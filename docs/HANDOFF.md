@@ -96,6 +96,27 @@ All four UUIDs in `limits.conf` were verified against the real disks.
   ls ~/chromiumos/src/overlays/overlay-amd64-generic/virtual/opengles/
   ls ~/chromiumos/src/overlays/overlay-amd64-generic/virtual/vulkan-icd/
   ```
+- **Nothing outside the chromiumos checkout exists inside the chroot.** `cros_sdk` mounts only
+  the checkout (as `/mnt/host/source`), plus `out` and `depot_tools`. This repo lives at
+  `~/CodeEnv/ChromiumOS-NVIDIA-cross`, outside all of them.
+
+  This bit twice. `stage_link` used to **symlink** the overlay into `src/overlays/`, which
+  resolves on the host and **dangles in the chroot**; and all three NVIDIA ebuilds default
+  `NVIDIA_VENDOR_DIR` to `/mnt/host/source/src/platform/chromiumos-nvidia-cross/vendor`, a
+  path that did not exist at all.
+
+  The overlay failure was deceptive: `portage_util._GetKnownOverlays()` globs `src/overlays/*`
+  and calls `GetOverlayName()` on each hit; for a dangling link that read fails, the overlay
+  is **skipped silently**, and the board simply ceases to exist. The symptom is
+  `ValueError: No such board: nvidia-generic` from `build_query.Board.get`, which reads like a
+  missing profile rather than a broken mount. The vendor failure would have surfaced hours
+  into `build-packages`, well after the cheap gate passed.
+
+  `sync_project_into_checkout()` in `sdk/build.sh` now places **real content** at both paths
+  and uses no symlinks: `rsync -a --delete` for the overlay, and `cp -al` for the 2.2 GB
+  vendor bundle (a hardlink farm — instant, no extra disk, same filesystem here, with a copy
+  fallback). `stage_packages` re-syncs too, so editing the repo and running that stage alone
+  cannot build stale contents. **If you add a new in-chroot path, check it against this.**
 - **`virtual/chromeos-bsp` must be overridden or the board's packages are silently absent.**
   `virtual/target-chromium-os` depends on the virtual, never on a board package directly.
   amd64-generic does not override it. An orphaned package is not a portage error, so this

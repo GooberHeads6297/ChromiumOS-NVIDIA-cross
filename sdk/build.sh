@@ -147,23 +147,79 @@ ensure_sudo() {
 #
 # A symlink keeps this repo the single source of truth: edits here take effect in
 # the checkout without copying, and the checkout stays disposable.
+# Copy this project into the chromiumos checkout.
+#
+# WHY A COPY AND NOT A SYMLINK. This used to symlink
+#   ~/chromiumos/src/overlays/overlay-nvidia-generic -> <this repo>/overlay/overlay-nvidia-generic
+# which resolves fine on the host and is *dangling inside the chroot*. cros_sdk mounts only
+# the checkout (as /mnt/host/source), plus out and depot_tools -- this repo lives outside all
+# of them, so nothing under ~/CodeEnv exists in there.
+#
+# The failure was not obvious. portage_util._GetKnownOverlays() globs src/overlays/* and calls
+# GetOverlayName() on each hit; for a dangling link that read fails, the overlay is skipped
+# silently, and the board simply does not exist. What you see is
+#   ValueError: No such board: nvidia-generic
+# from build_query.Board.get, which reads like a missing profile rather than a broken mount.
+#
+# The same trap applied to the NVIDIA bundle. All three NVIDIA ebuilds default
+# NVIDIA_VENDOR_DIR to /mnt/host/source/src/platform/chromiumos-nvidia-cross/vendor, a path
+# that did not exist at all -- so those would have died partway through build-packages, hours
+# in, long after the cheap gate had passed.
+#
+# So: put real content at both in-chroot paths and use no symlinks.
+sync_project_into_checkout() {
+    [ -d "$OVERLAY_SRC" ] || die "no overlay at ${OVERLAY_SRC}"
+
+    # --- the board overlay -------------------------------------------------
+    mkdir -p "${CROS_CHECKOUT}/src/overlays" || die "cannot create src/overlays"
+
+    if [ -L "$OVERLAY_DST" ]; then
+        # Left behind by an older version of this script. It is the bug described above.
+        log "removing the old dangling symlink at ${OVERLAY_DST}"
+        rm -f "$OVERLAY_DST" || die "could not remove ${OVERLAY_DST}"
+    fi
+
+    # --delete so a file removed here is removed there; a stale ebuild in the checkout would
+    # otherwise keep being built. Excludes are editor and VCS noise only.
+    log "syncing overlay -> ${OVERLAY_DST}"
+    rsync -a --delete \
+        --exclude '.git' --exclude '*.swp' --exclude '*~' \
+        "${OVERLAY_SRC}/" "${OVERLAY_DST}/" \
+        || die "rsync of the overlay into ${OVERLAY_DST} failed"
+
+    # --- the NVIDIA vendor bundle ------------------------------------------
+    # 2.2 GB, so copying it properly would be slow and waste real disk. cp -al makes a
+    # hardlink farm instead: near-instant, no extra space, and the files are genuinely inside
+    # the checkout so the chroot sees them. Hardlinks need one filesystem, hence the fallback.
+    local vendor_src="${REPO_ROOT}/vendor"
+    local platform_dst="${CROS_CHECKOUT}/src/platform/chromiumos-nvidia-cross"
+
+    if [ -d "$vendor_src" ]; then
+        mkdir -p "$platform_dst" || die "cannot create ${platform_dst}"
+        if [ -e "${platform_dst}/vendor" ]; then
+            rm -rf "${platform_dst}/vendor" || die "could not clear ${platform_dst}/vendor"
+        fi
+        if cp -al "$vendor_src" "${platform_dst}/vendor" 2>/dev/null; then
+            log "hardlinked vendor/ -> ${platform_dst}/vendor"
+        else
+            warn "hardlinking failed (different filesystems?); copying 2.2 GB instead"
+            cp -a "$vendor_src" "${platform_dst}/vendor" \
+                || die "could not copy ${vendor_src} into ${platform_dst}"
+            log "copied vendor/ -> ${platform_dst}/vendor"
+        fi
+    else
+        warn "no vendor/ directory; run ./tools/fetch-nvidia.sh before building"
+    fi
+}
+
 # ---------------------------------------------------------------------------
 stage_link() {
     banner "link: installing overlay and patches"
 
     if [ "$BOARD" != "amd64-generic" ]; then
-        [ -d "$OVERLAY_SRC" ] || die "no overlay at ${OVERLAY_SRC}"
-        mkdir -p "${CROS_CHECKOUT}/src/overlays"
-        if [ -L "$OVERLAY_DST" ]; then
-            log "overlay symlink already present; refreshing"
-            rm -f "$OVERLAY_DST"
-        elif [ -d "$OVERLAY_DST" ]; then
-            die "${OVERLAY_DST} exists as a real directory; move it aside first"
-        fi
-        ln -s "$OVERLAY_SRC" "$OVERLAY_DST"
-        log "linked ${OVERLAY_DST} -> ${OVERLAY_SRC}"
+        sync_project_into_checkout
     else
-        log "board is amd64-generic (stock); no overlay to link"
+        log "board is amd64-generic (stock); no overlay to install"
     fi
 
     # Install the board kernel flavour config into the kernel tree.
@@ -255,6 +311,13 @@ stage_packages() {
      Without it amdgpu cannot initialise this machine's Raphael iGPU, which is the
      recovery console the Stage 2 bring-up depends on."
         fi
+    fi
+
+    # Re-sync before building. Now that the overlay is a copy rather than a symlink, an edit
+    # here does not reach the checkout on its own, so running this stage alone after editing
+    # would quietly build the previous contents. The sync is idempotent and takes moments.
+    if [ "$BOARD" != "amd64-generic" ]; then
+        sync_project_into_checkout
     fi
 
     ensure_sudo
