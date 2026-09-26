@@ -16,9 +16,14 @@
 # order to flash it. A label survives unmounting, so it covers precisely that gap.
 #
 # Usage:
-#   sudo ./tools/flash.sh --board amd64-generic  --target usb           # baseline boot test
-#   sudo ./tools/flash.sh --board nvidia-generic --target usb           # the real thing
-#   sudo ./tools/flash.sh --board nvidia-generic --target usb --dry-run
+#   sudo ./tools/flash.sh --board amd64-generic  --target usb --dry-run
+#   sudo ./tools/flash.sh --board amd64-generic  --target usb              # baseline test
+#   sudo ./tools/flash.sh --board nvidia-generic --target usb              # the real thing
+#   sudo ./tools/flash.sh --board nvidia-generic --target usb --device /dev/sdc
+#
+# With --target usb the device is auto-detected when exactly one removable device is
+# present, and --device names it explicitly otherwise. Fixed disks are refused outright on
+# this path, so it cannot be aimed at sda, sdb or nvme1n1.
 #
 # USB is the normal target. For an internal disk the documented route is to boot the USB
 # and run tools/install-to-disk.sh there, which sizes the stateful partition to the disk;
@@ -36,12 +41,14 @@ BOARD=nvidia-generic
 TARGET=""
 DRY_RUN=0
 IMAGE=""
+USB_DEVICE=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --board)   BOARD="${2:?}"; shift ;;
         --target)  TARGET="${2:?}"; shift ;;
         --image)   IMAGE="${2:?}"; shift ;;
+        --device)  USB_DEVICE="${2:?}"; shift ;;
         --dry-run) DRY_RUN=1 ;;
         -h|--help) sed -n '1,18p' "$0"; exit 0 ;;
         *)         die "unknown argument: $1" ;;
@@ -52,17 +59,102 @@ done
 [ -n "$TARGET" ] || die "--target is required (e.g. nvme1n1, or 'usb' for cros flash usb://)"
 
 # ---------------------------------------------------------------------------
-# The USB path delegates to cros flash, which prompts for the device itself and
-# never touches an internal disk.
+# The USB path.
+#
+# Bare `cros flash usb://` prompts for the device and picks nothing itself, which means
+# the destination is decided by whoever reads that prompt. This branch used to exec
+# straight into it, so none of the five refusals below applied to the USB path at all --
+# the busiest path in the runbook was also the least guarded.
+#
+# So resolve and validate a specific device here, then hand cros flash an explicit target
+# instead of letting it ask. Auto-detection only ever accepts removable devices, and
+# refuses to guess when there is more than one candidate.
 # ---------------------------------------------------------------------------
 if [ "$TARGET" = "usb" ]; then
-    banner "flashing ${BOARD}/latest to USB via cros flash"
-    warn "cros flash will completely replace the contents of the USB device it prompts for."
+    banner "flashing ${BOARD}/latest to USB"
+
+    if [ -z "$USB_DEVICE" ]; then
+        candidates=""
+        for d in /sys/block/*; do
+            n="$(basename "$d")"
+            [ "$(cat "${d}/removable" 2>/dev/null || echo 0)" = "1" ] || continue
+            # Skip empty card readers and the like, which report removable=1 with no media.
+            [ "$(cat "${d}/size" 2>/dev/null || echo 0)" -gt 0 ] || continue
+            candidates="${candidates}${n} "
+        done
+        set -- $candidates
+        case $# in
+            0) die "no removable device found. Plug the USB stick in, or pass --device /dev/sdX" ;;
+            1) USB_DEVICE="/dev/$1"; log "auto-detected the only removable device: ${USB_DEVICE}" ;;
+            *) err "more than one removable device present:"
+               for n in $candidates; do
+                   printf '       /dev/%-8s %s  %s\n' "$n" \
+                       "$(lsblk -dno SIZE "/dev/$n" 2>/dev/null | tr -d ' ')" \
+                       "$(lsblk -dno MODEL "/dev/$n" 2>/dev/null | sed 's/ *$//')" >&2
+               done
+               die "refusing to guess; pass --device /dev/sdX" ;;
+        esac
+    fi
+
+    USB_NAME="$(basename "$USB_DEVICE")"
+    [ -b "$USB_DEVICE" ] || die "not a block device: ${USB_DEVICE}"
+    [ -d "/sys/block/${USB_NAME}" ] || die "${USB_DEVICE} is a partition; pass the whole disk"
+
+    # Removable is the load-bearing check here: it is what makes it impossible to aim this
+    # branch at sda, sdb or nvme1n1, all of which report removable=0 on this machine.
+    if [ "$(cat "/sys/block/${USB_NAME}/removable" 2>/dev/null || echo 0)" != "1" ]; then
+        err "${USB_DEVICE} is a FIXED disk, not removable media."
+        err "The USB target refuses fixed disks. To install to an internal disk, boot the"
+        err "USB image and use tools/install-to-disk.sh there -- see docs/INSTALL.md."
+        die "refusing to flash a fixed disk via --target usb"
+    fi
+
+    root_src="$(findmnt -no SOURCE / 2>/dev/null || true)"
+    root_disk="$(lsblk -no PKNAME "$root_src" 2>/dev/null | head -1 || true)"
+    [ -n "$root_disk" ] && [ "$root_disk" = "$USB_NAME" ] && \
+        die "${USB_DEVICE} is the disk carrying your root filesystem. Absolutely not."
+
+    log "target ${USB_DEVICE} ($(lsblk -dno SIZE "$USB_DEVICE" 2>/dev/null | tr -d ' ')$(
+        m="$(lsblk -dno MODEL "$USB_DEVICE" 2>/dev/null | sed 's/ *$//')"; [ -n "$m" ] && printf ', %s' "$m")), removable"
+    lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT "$USB_DEVICE" 2>/dev/null | sed 's/^/       /'
+
     if [ "$DRY_RUN" -eq 1 ]; then
-        log "WOULD RUN: cros flash usb:// ${BOARD}/latest"
+        labels="$(disk_fs_labels "$USB_DEVICE" | tr '\n' ' ')"
+        [ -n "$labels" ] && warn "carries filesystem label(s): ${labels}"
+        log "all USB safety checks passed; nothing was written"
+        log "WOULD RUN: cros flash usb://${USB_DEVICE} ${BOARD}/latest"
         exit 0
     fi
+
+    confirm_if_labelled "$USB_DEVICE" || die "aborted at the label confirmation"
+
+    warn "everything on ${USB_DEVICE} will be destroyed."
+    printf '\nType the device name (%s) to confirm: ' "$USB_NAME" >&2
+    read -r reply
+    [ "$reply" = "$USB_NAME" ] || die "confirmation did not match; nothing was written"
+
+    require_root
     cd "$CROS_CHECKOUT" || die "no checkout at ${CROS_CHECKOUT}"
+
+    # Prefer the explicit form so cros flash does not prompt. If this chromite version
+    # does not accept a device path under usb://, it fails before writing anything, and we
+    # fall back to the documented bare form -- with the device we validated printed, so
+    # there is a known-correct answer to match against at the prompt.
+    log "running: cros flash usb://${USB_DEVICE} ${BOARD}/latest"
+    if ./chromite/bin/cros flash "usb://${USB_DEVICE}" "${BOARD}/latest"; then
+        sync
+        banner "flash complete"
+        log "${USB_DEVICE} now holds ${BOARD}/latest"
+        exit 0
+    fi
+
+    banner "explicit device form failed"
+    warn "this chromite may not accept a device path under usb://."
+    warn "Falling back to the prompting form. At the prompt, choose exactly:"
+    warn "    ${USB_DEVICE}"
+    printf '\nProceed with the interactive prompt? [y/N] ' >&2
+    read -r reply
+    case "$reply" in y|Y) ;; *) die "aborted; nothing further was written" ;; esac
     exec ./chromite/bin/cros flash "usb://" "${BOARD}/latest"
 fi
 
