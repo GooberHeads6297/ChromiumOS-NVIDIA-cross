@@ -5,11 +5,15 @@
 # wrapper exists so that the disk name is checked against an allowlist by something
 # other than the operator's attention at 2am.
 #
-# Four independent refusals protect sda:
+# Five independent refusals protect your data:
 #   1. the target must appear in ALLOWED_TARGET_DISKS
 #   2. the target must not appear in FORBIDDEN_TARGET_DISKS
 #   3. the target must not be the disk currently carrying /
 #   4. the target must have nothing mounted
+#   5. a protected filesystem label requires typing that label to confirm
+#
+# Check 5 exists because check 4 stops working the moment someone unmounts a disk in
+# order to flash it. A label survives unmounting, so it covers precisely that gap.
 #
 # Usage:
 #   sudo ./tools/flash.sh --board nvidia-generic --target nvme1n1
@@ -101,6 +105,17 @@ if [ -n "$mounts" ]; then
 fi
 log "nothing mounted on ${DEV}"
 
+# ---- refusal 5: protected filesystem label -------------------------------
+# Deliberately after the mount check, because this is the one that still applies once
+# the disk has been unmounted.
+if [ "$DRY_RUN" -eq 0 ]; then
+    confirm_if_labelled "$DEV" || die "aborted at the label confirmation"
+else
+    labels="$(disk_fs_labels "$DEV" | tr '\n' ' ')"
+    [ -n "$labels" ] && warn "target carries filesystem label(s): ${labels}" \
+                     || log "target has no filesystem labels"
+fi
+
 # ---------------------------------------------------------------------------
 # Locate the image.
 # ---------------------------------------------------------------------------
@@ -125,6 +140,13 @@ cat >&2 <<EOF
   board  : ${BOARD}
 
 Everything currently on ${DEV} will be destroyed.
+
+NOTE: for an internal disk, the documented route is USB first, then
+tools/install-to-disk.sh from the booted image -- see docs/INSTALL.md.
+Writing the image straight to a disk leaves the partition table sized for the
+image rather than for ${SIZE_H:-the disk}, so the stateful partition does not grow into the
+free space. chromeos-install sizes it correctly. This path is fine for a
+re-flash, but it is not the recommended first install.
 EOF
 
 if [ "$DRY_RUN" -eq 1 ]; then

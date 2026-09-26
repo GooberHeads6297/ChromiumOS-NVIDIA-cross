@@ -114,6 +114,61 @@ assert_no_flash_tools() {
     log "no VBIOS flashing tools on PATH"
 }
 
+# Report the filesystem labels found on a disk's partitions, one per line.
+disk_fs_labels() {
+    local dev="$1"
+    lsblk -no LABEL "$dev" 2>/dev/null | sed 's/^ *//;s/ *$//' | grep -v '^$' || true
+}
+
+# Warn, and demand an explicit typed confirmation, when the target disk carries a
+# filesystem label we have flagged as worth protecting.
+#
+# This exists to cover a specific hole. Checking "is anything mounted?" is a good guard
+# right up until someone unmounts the disk to prepare it for flashing, at which point the
+# guard silently stops guarding. A label survives unmounting, so it keeps working exactly
+# when the mount check stops.
+#
+# Returns 0 to proceed, non-zero to abort.
+confirm_if_labelled() {
+    local dev="$1" auto_yes="${2:-0}"
+    local labels found="" l p
+    labels="$(disk_fs_labels "$dev")"
+    [ -n "$labels" ] || return 0
+
+    for l in $labels; do
+        for p in ${PROTECTED_FS_LABELS:-}; do
+            [ "$l" = "$p" ] && found="$l"
+        done
+    done
+
+    if [ -z "$found" ]; then
+        log "target ${dev} has filesystem label(s) [$(echo "$labels" | tr '\n' ' ')] -- none protected"
+        return 0
+    fi
+
+    banner "target ${dev} carries protected filesystem label '${found}'"
+    err "This disk is formatted and labelled. Everything on it will be destroyed,"
+    err "and not just that partition -- the entire disk is repartitioned."
+    printf '\n' >&2
+    lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT "$dev" 2>/dev/null | sed 's/^/     /' >&2
+    printf '\n' >&2
+
+    if [ "$auto_yes" = "1" ]; then
+        warn "proceeding without prompting (--yes given)"
+        return 0
+    fi
+
+    printf 'Type the label (%s) to confirm you mean to destroy it: ' "$found" >&2
+    local reply
+    read -r reply
+    if [ "$reply" != "$found" ]; then
+        err "confirmation did not match; nothing was written"
+        return 1
+    fi
+    log "confirmed destruction of '${found}' on ${dev}"
+    return 0
+}
+
 # Assert the caps we are about to apply are inside the card's own legal range and
 # never above stock. Guards against a typo in limits.conf becoming an overclock.
 assert_caps_sane() {

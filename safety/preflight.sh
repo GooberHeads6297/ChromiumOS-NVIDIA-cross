@@ -128,10 +128,17 @@ else
     for d in $ALLOWED_TARGET_DISKS; do
         [ "$tgt" = "$d" ] && allowed=1
     done
+    # ALLOWED_TARGET_DISKS governs INTERNAL disks. Removable media is judged on the
+    # removable flag instead, because the USB phase writes to a stick that has no reason
+    # to be in the allowlist, and a removable device is a safer target than any internal
+    # disk by definition: it cannot be Ubuntu and it cannot be a data disk we care about.
+    removable="$(cat "/sys/block/${tgt}/removable" 2>/dev/null || echo 0)"
     if [ "$allowed" -eq 1 ]; then
         pass "target ${tgt} is in the allowlist"
+    elif [ "$removable" = "1" ]; then
+        pass "target ${tgt} is removable media: valid for the USB phase, not an internal install"
     else
-        fail "target ${tgt} is not in ALLOWED_TARGET_DISKS (${ALLOWED_TARGET_DISKS})"
+        fail "target ${tgt} is a fixed disk and not in ALLOWED_TARGET_DISKS (${ALLOWED_TARGET_DISKS})"
     fi
     if [ -b "/dev/${tgt}" ]; then
         pass "/dev/${tgt} exists ($(lsblk -dno SIZE "/dev/${tgt}" 2>/dev/null | tr -d ' '))"

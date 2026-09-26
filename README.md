@@ -57,14 +57,32 @@ sudo ./safety/vbios-backup.sh
 # 3. Baseline build with no NVIDIA at all -- prove the boot path first.
 ./sdk/build.sh --board amd64-generic all
 
-# 4. Flash to a spare disk. Refuses sda four different ways.
-sudo ./safety/preflight.sh nvme1n1
-sudo ./tools/flash.sh --board amd64-generic --target nvme1n1
-
-# 5. Then the NVIDIA board, and check the gate on the device.
+# 4. Build the NVIDIA board.
 ./sdk/build.sh --board nvidia-generic all
-# on the device:  ./verify-stage2.sh
+
+# 5. Flash to the USB stick. Refuses sda five different ways.
+sudo ./safety/preflight.sh sdc
+sudo ./tools/flash.sh --board nvidia-generic --target usb
+
+# 6. Boot the USB with the monitor on the motherboard, then on the device:
+#      sudo start gpu-guard
+#      sudo ./tools/verify-stage2.sh     # driver loads, iGPU keeps the console
+#      sudo ./tools/verify-stage3.sh     # UI renders on the RTX
+
+# 7. Only once both gates pass, install to the internal disk (from the booted USB):
+#      sudo ./tools/install-to-disk.sh --dst /dev/nvme1n1 --dry-run
+#      sudo ./tools/install-to-disk.sh --dst /dev/nvme1n1
+
+# 8. Reboot from nvme1n1, re-run both gates there, and only then set up Steam.
 ```
+
+**USB before internal disk, and Steam last.** The ordering is not a style preference:
+Stage 3 is the part most likely to fail, and failing it from a USB stick costs a reflash
+instead of a reinstall. Steam is gated in code — `setup-steam-container.sh` refuses to run
+while the root filesystem is on removable media, because a USB stateful partition cannot
+hold a modern game and anything set up there is destroyed by the install anyway.
+
+Full procedure with firmware settings and recovery paths: **[docs/INSTALL.md](docs/INSTALL.md)**.
 
 ## Layout
 
@@ -83,7 +101,9 @@ sudo ./tools/flash.sh --board amd64-generic --target nvme1n1
 | `patches/kernel/` | Config fragment that lets an out-of-tree module load |
 | `steam/container/` | Steam + Proton with direct `/dev/nvidia*` access |
 | `tools/verify-stage{2,3}.sh` | Gate checks, run on the device |
-| `tools/flash.sh` | Image writer with a disk allowlist |
+| `tools/flash.sh` | Image writer with a disk allowlist and label guard |
+| `tools/install-to-disk.sh` | USB-to-internal install; refuses Ubuntu by filesystem UUID |
+| [docs/INSTALL.md](docs/INSTALL.md) | **The runbook: USB, then internal disk, then Steam** |
 | [docs/architecture.md](docs/architecture.md) | Target stack, stage gates, known hard problems |
 | [docs/hardware.md](docs/hardware.md) | Measured hardware facts |
 | [docs/research.md](docs/research.md) | Origin research and where it was wrong |

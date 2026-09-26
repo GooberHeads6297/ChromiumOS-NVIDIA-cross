@@ -1,7 +1,12 @@
 #!/bin/bash
 # steam/container/setup-steam-container.sh -- Steam + Proton with native NVIDIA Vulkan.
 #
-# Run this ON the ChromiumOS device, after the Stage 3 gate passes.
+# Run this ON the ChromiumOS device. Two preconditions, both enforced at runtime:
+#
+#   1. ChromiumOS must be INSTALLED TO AN INTERNAL DISK. Not running from the USB stick.
+#      See assert_installed_not_usb below for why this is a hard refusal.
+#   2. The Stage 3 gate must pass on that installed system. Passing from USB does not
+#      count; the installed system has its own kernel and module set.
 #
 # Why a container we build ourselves rather than a ChromeOS feature:
 #
@@ -76,6 +81,7 @@ verify_host() {
 
 # ---------------------------------------------------------------------------
 do_create() {
+    assert_installed_not_usb
     verify_host
     command -v debootstrap >/dev/null 2>&1 || \
         die "debootstrap not available on the ChromeOS host.
@@ -248,7 +254,64 @@ do_verify() {
 }
 
 # ---------------------------------------------------------------------------
+# Refuse to set up Steam while running from the USB stick.
+#
+# Steam must not be touched until ChromiumOS is installed to an internal disk. Reasons,
+# in order of how much they will ruin your evening:
+#
+#   1. A USB stick's stateful partition is tiny. A single modern game does not fit, and
+#      filling the stateful partition on ChromeOS wedges the session, not just the game.
+#   2. Proton builds a shader cache on first run and rewrites it constantly. On USB flash
+#      that is both painfully slow and hard on the stick.
+#   3. Everything in the container lives on the stateful partition, so it is destroyed by
+#      the install anyway. Any setup done from USB is wasted work.
+#   4. Debugging is much harder. If a game misbehaves you want to be sure you are looking
+#      at a driver problem, not USB latency starving the GPU.
+#
+# Detection is by the root device's removable flag, using ChromeOS's own rootdev where
+# available. This is a hard gate for create and steam; verify is read-only and allowed.
+assert_installed_not_usb() {
+    local root_disk="" root_src
+
+    if command -v rootdev >/dev/null 2>&1; then
+        root_disk="$(basename "$(rootdev -s -d 2>/dev/null || true)")"
+    fi
+    if [ -z "$root_disk" ]; then
+        root_src="$(findmnt -no SOURCE / 2>/dev/null || true)"
+        [ -n "$root_src" ] && root_disk="$(lsblk -no PKNAME "$root_src" 2>/dev/null | head -1)"
+    fi
+
+    if [ -z "$root_disk" ]; then
+        log "WARNING could not determine the root device, so cannot confirm this is an"
+        log "installed system rather than the USB stick. Proceeding, but verify by hand."
+        return 0
+    fi
+
+    local removable
+    removable="$(cat "/sys/block/${root_disk}/removable" 2>/dev/null || echo 0)"
+
+    if [ "$removable" = "1" ]; then
+        log "REFUSING: this system is running from removable media (/dev/${root_disk})."
+        log ""
+        log "Steam setup comes after ChromiumOS is installed to an internal disk, not before."
+        log "Anything set up now lives on the USB stateful partition and is destroyed by the"
+        log "install, so it is wasted work even if it appears to succeed."
+        log ""
+        log "Install first, from this booted USB:"
+        log "    sudo tools/install-to-disk.sh --dst /dev/nvme1n1 --dry-run"
+        log "    sudo tools/install-to-disk.sh --dst /dev/nvme1n1"
+        log ""
+        log "Then reboot from the internal disk, re-run tools/verify-stage2.sh and"
+        log "tools/verify-stage3.sh there, and come back to this script."
+        die "not installed to an internal disk yet"
+    fi
+
+    log "running from internal disk /dev/${root_disk} (removable=0)"
+}
+
+# ---------------------------------------------------------------------------
 do_steam() {
+    assert_installed_not_usb
     verify_host
 
     # Refuse to run a gaming workload without the thermal watchdog. This is the moment

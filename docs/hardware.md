@@ -146,13 +146,31 @@ nothing to keep.
 | Device | Size | State | Role |
 | --- | --- | --- | --- |
 | `sda` | 931.5 GB | `sda1` /boot/efi, `sda2` / (779 GB free) | **Ubuntu. Never a target.** |
-| `sdb` | 931.5 GB | Single partition, unmounted | Available bare-metal target |
-| `sdc` | 29.1 GB | No partitions | Likely a USB stick |
-| `nvme1n1` | 476.9 GB | No partitions, unmounted | **Preferred bare-metal target** |
+| `sdb` | 931.5 GB | `sdb1` ext4, label `Data`, auto-mounted | Steam games library |
+| `sdc` | 29.1 GB | `removable=1`, no partitions | USB stick for boot testing |
+| `nvme1n1` | 476.9 GB | `nvme1n1p1` ext4, label `Data3`, auto-mounted | **ChromiumOS install target** |
 
-`sda` is listed in `FORBIDDEN_TARGET_DISKS`; `sdb` and `nvme1n1` form the allowlist.
-`preflight.sh` additionally rejects whatever disk currently carries `/`, so the
-protection does not depend on the device name staying stable.
+Both `sdb` and `nvme1n1` carry a formatted, labelled ext4 partition that the desktop
+auto-mounts, so neither is a blank disk. Measured contents at the time of writing: 2.1 MB
+used on each, holding one empty `SteamLibrary` directory plus `lost+found`. Wiping either
+therefore loses nothing real, but installing to one destroys **the whole disk**, not just
+that partition.
+
+`nvme1n1` is the OS target because NVMe is substantially faster for boot, package
+installs and shader compilation. `sdb` stays as bulk game storage and gets mounted into
+the Steam container at Stage 4.
+
+`sdc` is the only device reporting `removable=1`, which makes it the USB stick.
+
+Protection layers, in order of how easily each can be defeated:
+
+- `sda` is in `FORBIDDEN_TARGET_DISKS` and additionally rejected by `preflight.sh` as
+  the disk carrying `/`, so the guard survives device renaming.
+- `sdb` and `nvme1n1` are in `ALLOWED_TARGET_DISKS`.
+- Any target with a filesystem label in `PROTECTED_FS_LABELS` requires typing the label
+  to confirm. This exists because a mounted-partition check alone is not enough:
+  unmounting a disk in preparation for flashing would otherwise remove the last
+  safeguard silently.
 
 ## Build environment notes
 
