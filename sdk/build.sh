@@ -202,13 +202,27 @@ stage_link() {
 stage_setup() {
     banner "setup: board sysroot for ${BOARD}"
     log "note: 'all' does not run this; cros build-packages sets the board up itself"
+    if ! sudo -n true 2>/dev/null; then
+        # cros_sdk sudoes to enter its container, so a cached credential or an interactive
+        # terminal is required. Said explicitly because the raw failure is
+        # "sudo: A terminal is required to authenticate", which does not obviously point at
+        # this script, and is easy to misread as an SDK or host-compatibility problem.
+        die "sudo needs a password and there is no terminal to ask on.
+
+     cros_sdk sudoes for itself to enter its container. Run this from an interactive
+     shell, or prime the credential first with:  sudo -v"
+    fi
+
     # setup_board is idempotent; --force would discard the sysroot, so it is not used.
     cros_sdk_cmd "${CHROOT_SOURCE_ROOT}/chromite/bin/setup_board" --board="$BOARD" || \
-        die "setup_board failed.
+        die "setup_board failed for ${BOARD}.
 
-     This is a likely point for a host incompatibility on Ubuntu 26.04.
-     If the error mentions user namespaces, setgroups, or python, use the container
-     fallback:  ./sdk/bootstrap.sh --container"
+     Read the error above before assuming a host problem. The usual causes, in order:
+       - a profile or ebuild in overlay/overlay-${BOARD}/ that does not resolve,
+         which is exactly what this stage exists to catch;
+       - a masked or missing dependency, reported by portage as such;
+       - a host incompatibility, which would mention user namespaces, setgroups or
+         python. Only in that case try:  ./sdk/bootstrap.sh --container"
 }
 
 stage_packages() {
