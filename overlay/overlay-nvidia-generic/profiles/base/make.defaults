@@ -1,0 +1,17 @@
+# Board defaults for nvidia-generic.
+#
+# Inherits everything from amd64-generic (see profiles/base/parent); this file only
+# states what differs.
+
+# Mesa drivers to build. The iGPU path (amdgpu/radeonsi) is kept because it is the
+# recovery console and must always work -- Stage 2 deliberately keeps the display on
+# the iGPU while the NVIDIA driver is brought up.
+#
+# nouveau is included as a *diagnostic* fallback, not the intended driver. If the
+# NVIDIA module misbehaves it lets us prove PCI enumeration, DRM/KMS and modesetting
+# independently. minigbm already ships a nouveau dumb-buffer backend, so this path
+# works without patches, which makes it a useful control experiment.
+VIDEO_CARDS="amdgpu radeonsi nouveau"
+
+# Pull the NVIDIA stack into the image via the board BSP package.
+USE="${USE} nvidia_open"

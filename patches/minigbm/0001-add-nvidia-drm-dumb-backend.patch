@@ -1,0 +1,69 @@
+From: ChromiumOS-NVIDIA-cross <dev@localhost>
+Subject: [PATCH] minigbm: add an nvidia-drm dumb-buffer backend
+
+ChromeOS allocates graphics buffers through minigbm rather than Mesa's GBM, and
+minigbm matches backends by DRM driver name. It already ships backends for
+nouveau, radeon, evdi and others, but nothing matching "nvidia-drm", so on a
+system whose display is driven by NVIDIA's driver minigbm finds no backend and
+Chrome has nothing to render into.
+
+NVIDIA's nvidia-drm implements the standard DRM dumb-buffer ioctls when loaded
+with modeset=1, so the existing generic dumb backend is sufficient. This adds
+one registration using INIT_DUMB_DRIVER_WITH_NAME, needed rather than
+INIT_DUMB_DRIVER because "nvidia-drm" contains a hyphen and so cannot be a C
+identifier -- the same reason sun4i_drm already uses that form.
+
+Scope and limitations:
+
+  - Dumb buffers are linear and allocated by the kernel. This is enough to get
+    the ChromeOS UI on screen and is deliberately the smallest possible change.
+  - It does not provide GPU-optimal tiled allocation. Accelerated scanout, where
+    Chrome renders into buffers the display engine reads directly, requires
+    NVIDIA's libnvidia-allocator and is a separate piece of work.
+  - Requires nvidia-drm loaded with modeset=1. With modeset=0 (the Stage 2
+    default) no DRM device is registered and this backend is simply never matched,
+    which is harmless.
+
+Tested against minigbm main as of the commit this patch was generated from.
+
+--- a/drv.c	2026-09-26 08:00:09.835012896 -0500
++++ b/drv.c	2026-09-26 08:00:09.843367029 -0500
+@@ -54,6 +54,7 @@
+ extern const struct backend backend_mediatek;
+ extern const struct backend backend_meson;
+ extern const struct backend backend_nouveau;
++extern const struct backend backend_nvidia_drm;
+ extern const struct backend backend_komeda;
+ extern const struct backend backend_radeon;
+ extern const struct backend backend_rockchip;
+@@ -84,7 +85,10 @@
+ 	&backend_evdi,	    &backend_komeda,	&backend_marvell, &backend_mediatek,
+ 	&backend_meson,	    &backend_nouveau,	&backend_radeon,  &backend_rockchip,
+ 	&backend_sun4i_drm, &backend_synaptics, &backend_udl,	  &backend_virtgpu,
+-	&backend_vkms,	    &backend_mock
++	&backend_vkms,
++	/* NVIDIA discrete GPU via nvidia-drm (requires modeset=1). */
++	&backend_nvidia_drm,
++	&backend_mock
+ };
+ 
+ void drv_preload(bool load)
+--- a/dumb_driver.c	2026-09-26 08:00:09.835043433 -0500
++++ b/dumb_driver.c	2026-09-26 08:00:09.843288223 -0500
+@@ -70,6 +70,16 @@
+ INIT_DUMB_DRIVER(marvell)
+ INIT_DUMB_DRIVER(meson)
+ INIT_DUMB_DRIVER(nouveau)
++/*
++ * NVIDIA's nvidia-drm implements the DRM dumb-buffer ioctls when loaded with
++ * modeset=1, so the generic dumb backend is sufficient to get the ChromeOS UI on
++ * screen. The DRM driver name contains a hyphen, which is not valid in a C
++ * identifier, hence the _WITH_NAME form (same as sun4i_drm below).
++ *
++ * Dumb buffers are linear and unaccelerated. This is enough for Chrome to present,
++ * but GPU-optimal scanout needs libnvidia-allocator instead.
++ */
++INIT_DUMB_DRIVER_WITH_NAME(nvidia_drm, "nvidia-drm")
+ INIT_DUMB_DRIVER(radeon)
+ INIT_DUMB_DRIVER_WITH_NAME(sun4i_drm, "sun4i-drm")
+ INIT_DUMB_DRIVER(synaptics)

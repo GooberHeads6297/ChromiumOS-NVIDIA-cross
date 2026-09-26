@@ -1,0 +1,26 @@
+# /lib/udev/rules.d/99-nvidia-dev.rules
+#
+# Create and permission the NVIDIA device nodes.
+#
+# On a desktop distro nvidia-modprobe runs setuid at first use and creates these. That
+# does not happen on ChromeOS, so without these rules /dev/nvidia0 never appears and
+# nvidia-smi fails with "couldn't communicate with the NVIDIA driver" even though the
+# module is loaded correctly. That symptom is the reason this file exists.
+
+# Load the driver when the GPU is enumerated. Restricted to AD103 (10de:2705) rather
+# than all of 10de:* so an unrelated NVIDIA device cannot pull in this stack.
+ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{device}=="0x2705", \
+    RUN+="/sbin/modprobe nvidia"
+
+# Control and primary render nodes.
+KERNEL=="nvidia", RUN+="/bin/sh -c '/sbin/modprobe nvidia'"
+KERNEL=="nvidiactl", GROUP="video", MODE="0660"
+KERNEL=="nvidia[0-9]*", GROUP="video", MODE="0660"
+
+# Unified memory nodes, used by CUDA and by some Vulkan paths.
+KERNEL=="nvidia-uvm", GROUP="video", MODE="0660"
+KERNEL=="nvidia-uvm-tools", GROUP="video", MODE="0660"
+
+# DRM nodes appear only when nvidia-drm is loaded with modeset=1 (Stage 3).
+SUBSYSTEM=="drm", KERNEL=="card[0-9]*", GROUP="video", MODE="0660"
+SUBSYSTEM=="drm", KERNEL=="renderD[0-9]*", GROUP="video", MODE="0660"

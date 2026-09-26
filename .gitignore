@@ -1,0 +1,19 @@
+# NVIDIA driver bundle staged by tools/fetch-nvidia.sh.
+# ~500 MB, and NVIDIA's installer is not ours to redistribute. Reproduce it with:
+#   ./tools/fetch-nvidia.sh
+# Version, published sha256 and peeled tag commit are pinned in that script.
+/vendor/
+
+# Thermal logs from safety/thermal-log.sh
+/thermal-*.csv
+
+# VBIOS backups live outside the repo by default, but guard against a stray --out.
+*.rom
+*.rom.sha256
+
+# Build and editor noise
+*.o
+*.ko
+*.swp
+*~
+.DS_Store

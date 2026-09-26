@@ -1,0 +1,48 @@
+# Chrome flags for running the ChromeOS UI on the NVIDIA GPU (Stage 3).
+#
+# Append to /etc/chrome_dev.conf on the device, then restart the UI:
+#   restart ui
+#
+# /etc/chrome_dev.conf only exists on dev/test images, which is one more reason the
+# board builds with --no-enable-rootfs-verification.
+#
+# Why this file is needed at all: ChromeOS's graphics stack assumes Mesa. Chrome's
+# Ozone/DRM backend allocates through minigbm and gets EGL from Mesa's libEGL. NVIDIA
+# ships its own EGL implementation plus a separate GBM backend (libnvidia-egl-gbm), so
+# Chrome has to be pointed at them explicitly.
+
+# ---------------------------------------------------------------------------
+# Ozone platform. DRM/GBM is already the ChromeOS default; stated explicitly because
+# the whole point of this stage is which DRM device gets used.
+# ---------------------------------------------------------------------------
+--ozone-platform=drm
+
+# ---------------------------------------------------------------------------
+# Force GPU-accelerated compositing. If the NVIDIA path fails, Chrome will silently
+# fall back to software rendering and the UI will appear to "work" while proving
+# nothing. These flags make a failure visible instead of quiet.
+# ---------------------------------------------------------------------------
+--ignore-gpu-blocklist
+--enable-gpu-rasterization
+--disable-gpu-driver-bug-workarounds
+
+# ---------------------------------------------------------------------------
+# Use the native NVIDIA GL/EGL stack rather than SwiftShader.
+# ---------------------------------------------------------------------------
+--use-gl=egl
+--use-angle=gl-egl
+
+# ---------------------------------------------------------------------------
+# Vulkan. Optional for the UI, but turning it on here is the cheapest end-to-end check
+# that the NVIDIA ICD is being found by something other than our own test binary.
+# ---------------------------------------------------------------------------
+--enable-features=Vulkan
+--use-vulkan=native
+
+# ---------------------------------------------------------------------------
+# Logging. When the display path breaks the screen is exactly the wrong place to look
+# for the reason, so be verbose and expect to read this over SSH.
+# ---------------------------------------------------------------------------
+--enable-logging=stderr
+--v=1
+--vmodule=*ozone*=2,*gbm*=2,*drm*=2,*gl_*=2
