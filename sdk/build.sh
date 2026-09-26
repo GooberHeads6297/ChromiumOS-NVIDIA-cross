@@ -37,6 +37,9 @@ while [ $# -gt 0 ]; do
         --board)      BOARD="${2:?--board needs a value}"; shift ;;
         --image-type) IMAGE_TYPE="${2:?--image-type needs a value}"; shift ;;
         --check)      CHECK=1 ;;
+        # The stage is positional, but --stage is accepted too: it reads naturally and
+        # silently failing on it is a poor trade for one case label.
+        --stage)      STAGE="${2:?--stage needs a value}"; shift ;;
         link|setup|packages|image|all) STAGE="$1" ;;
         -h|--help)    sed -n '1,22p' "$0"; exit 0 ;;
         *)            die "unknown argument: $1" ;;
@@ -65,17 +68,22 @@ check_state() {
     else
         printf '  [FAIL]  cros CLI not found (expected in chromite/bin after repo sync)\n'
     fi
-    if [ "$BOARD" = "nvidia-generic" ]; then
+    # amd64-generic is the stock baseline board: it has no overlay by design, and
+    # stage_link deliberately skips both the symlink and the minigbm patch for it.
+    # Reporting a missing overlay as work to do would be wrong, not just noisy.
+    if [ "$BOARD" = "amd64-generic" ]; then
+        printf '  [ OK ]  stock baseline board: no overlay or minigbm patch applied\n'
+    else
         if [ -d "$OVERLAY_SRC" ]; then
             printf '  [ OK ]  board overlay source at %s\n' "$OVERLAY_SRC"
         else
             printf '  [FAIL]  missing board overlay %s\n' "$OVERLAY_SRC"
         fi
-    fi
-    if [ -L "$OVERLAY_DST" ] || [ -d "$OVERLAY_DST" ]; then
-        printf '  [ OK ]  overlay linked into checkout\n'
-    else
-        printf '  [TODO]  overlay not linked yet (run: %s link)\n' "$0"
+        if [ -L "$OVERLAY_DST" ] || [ -d "$OVERLAY_DST" ]; then
+            printf '  [ OK ]  overlay linked into checkout\n'
+        else
+            printf '  [TODO]  overlay not linked yet (run: %s --board %s link)\n' "$0" "$BOARD"
+        fi
     fi
     printf '\n'
 }
@@ -85,6 +93,10 @@ if [ "$CHECK" -eq 1 ]; then
     exit 0
 fi
 
+case "${STAGE:-}" in
+    ""|link|setup|packages|image|all) ;;
+    *) die "unknown stage '${STAGE}'. One of: link setup packages image all" ;;
+esac
 [ -n "$STAGE" ] || die "no stage given. One of: link setup packages image all (or --check)"
 [ -d "${CROS_CHECKOUT}/.repo" ] || die "no ChromiumOS checkout at ${CROS_CHECKOUT}; run ./sdk/bootstrap.sh"
 
@@ -178,9 +190,10 @@ Next steps:
   Try it in a VM first (costs nothing, catches obvious breakage):
     cros vm --start --image-path=${latest}/chromiumos_test_image.bin --board=${BOARD}
 
-  Then bare metal, through the safety gate:
-    sudo ./safety/preflight.sh nvme1n1
-    sudo ./tools/flash.sh --board ${BOARD} --target nvme1n1
+  Then the USB stick, through the safety gate. USB before any internal disk:
+  a failed boot costs a reflash instead of a reinstall. See docs/INSTALL.md.
+    sudo ./safety/preflight.sh sdc
+    sudo ./tools/flash.sh --board ${BOARD} --target usb
 
 Remember each build consumes up to 8 GB. Delete old ones under
 ${CROS_CHECKOUT}/src/build/images/${BOARD}/.

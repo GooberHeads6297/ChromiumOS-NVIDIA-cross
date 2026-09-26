@@ -16,9 +16,13 @@
 # order to flash it. A label survives unmounting, so it covers precisely that gap.
 #
 # Usage:
-#   sudo ./tools/flash.sh --board nvidia-generic --target nvme1n1
-#   sudo ./tools/flash.sh --board amd64-generic --target usb      # cros flash usb://
-#   sudo ./tools/flash.sh --board nvidia-generic --target nvme1n1 --dry-run
+#   sudo ./tools/flash.sh --board amd64-generic  --target usb           # baseline boot test
+#   sudo ./tools/flash.sh --board nvidia-generic --target usb           # the real thing
+#   sudo ./tools/flash.sh --board nvidia-generic --target usb --dry-run
+#
+# USB is the normal target. For an internal disk the documented route is to boot the USB
+# and run tools/install-to-disk.sh there, which sizes the stateful partition to the disk;
+# writing an image straight to a disk does not. See docs/INSTALL.md.
 
 set -uo pipefail
 

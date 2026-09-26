@@ -63,12 +63,49 @@ cd ~/CodeEnv/ChromiumOS-NVIDIA-cross
 # Read-only: shows what bootstrap will change before it changes anything.
 ./sdk/bootstrap.sh --check
 
-# Then do it. This is the long one.
+# Then do it. This is the long one. Run it under tmux or screen.
 ./sdk/bootstrap.sh
-
-# Link the overlay in, apply the minigbm patch, set up the board, build, image.
-./sdk/build.sh --stage all --board nvidia-generic
 ```
+
+Note `bootstrap.sh` is run as yourself, **not** under `sudo`. It calls `sudo` internally
+for the host packages and the sysctl. `cros_sdk` refuses to run as root and the checkout
+must be owned by you.
+
+It sets `kernel.apparmor_restrict_unprivileged_userns=0` and persists it to
+`/etc/sysctl.d/99-chromiumos-sdk.conf`. That is a machine-wide relaxation of an Ubuntu
+hardening control, not something scoped to the build: `cros_sdk` needs unprivileged user
+namespaces for its container and cannot work without them. `./sdk/bootstrap.sh --container`
+prints an LXD 24.04 recipe if you would rather keep the change inside a container.
+
+### Baseline board first
+
+Build stock `amd64-generic` before the NVIDIA board. The biggest unknown at this point is
+not our driver work — it is whether stock ChromiumOS boots on this motherboard at all,
+which is an ordinary hardware-support question independent of this repo. Answering it on a
+throwaway build means every later failure is attributable to the NVIDIA work rather than
+ambiguous.
+
+`build.sh` knows `amd64-generic` is a baseline: it skips both the overlay symlink and the
+minigbm patch for that board, so the baseline really is stock.
+
+```bash
+./sdk/build.sh --board amd64-generic all
+```
+
+The stage is positional; `--stage all` also works. Flash this to USB (Phase 2), confirm it
+boots (Phase 3), and only then build the real board:
+
+```bash
+./sdk/build.sh --board nvidia-generic all
+```
+
+Each board gets its own sysroot, so board packages rebuild rather than being shared. The
+`repo sync` and the SDK chroot are shared, so the second build is the cheaper one.
+
+If `amd64-generic` will not boot on this board, the fallback is `reven`, the ChromeOS Flex
+board, which is the one actually designed for generic desktop PCs. Our overlay masters
+`amd64-generic`, so that is a change rather than a flag — but it is the next thing to try,
+not a dead end.
 
 Note `cros_sdk` refuses to run as root and everything here runs as `gooberheads`, not
 under `sudo`. The `cros` CLI enters the chroot itself; you never do it manually.
