@@ -117,6 +117,31 @@ cros_sdk_cmd() {
     ( cd "$CROS_CHECKOUT" && ./chromite/bin/cros_sdk -- "$@" )
 }
 
+# Get a sudo credential before starting anything long.
+#
+# Every cros command here sudoes to enter its container. Without this, the password prompt
+# appears whenever sudo's timeout happens to lapse -- which for build-packages can be hours
+# in, on a step that then sits waiting for input it may never get. Priming up front makes the
+# prompt happen at a predictable moment, with context.
+#
+# Only refuse when there is genuinely no way to ask: no cached credential AND no terminal on
+# stdin. Given a terminal, sudo can prompt, so asking beats failing and telling the user to
+# run `sudo -v` themselves.
+ensure_sudo() {
+    sudo -n true 2>/dev/null && return 0
+
+    if [ -t 0 ]; then
+        log "cros_sdk needs sudo; authenticating now so it does not prompt later"
+        sudo -v || die "sudo authentication failed or was cancelled."
+        return 0
+    fi
+
+    die "sudo needs a password and stdin is not a terminal, so it cannot ask.
+
+     cros_sdk sudoes for itself to enter its container. Run this from an interactive
+     shell, or prime the credential first with:  sudo -v"
+}
+
 # ---------------------------------------------------------------------------
 # link: put our overlay and patches where portage will find them.
 #
@@ -202,16 +227,7 @@ stage_link() {
 stage_setup() {
     banner "setup: board sysroot for ${BOARD}"
     log "note: 'all' does not run this; cros build-packages sets the board up itself"
-    if ! sudo -n true 2>/dev/null; then
-        # cros_sdk sudoes to enter its container, so a cached credential or an interactive
-        # terminal is required. Said explicitly because the raw failure is
-        # "sudo: A terminal is required to authenticate", which does not obviously point at
-        # this script, and is easy to misread as an SDK or host-compatibility problem.
-        die "sudo needs a password and there is no terminal to ask on.
-
-     cros_sdk sudoes for itself to enter its container. Run this from an interactive
-     shell, or prime the credential first with:  sudo -v"
-    fi
+    ensure_sudo
 
     # setup_board is idempotent; --force would discard the sysroot, so it is not used.
     cros_sdk_cmd "${CHROOT_SOURCE_ROOT}/chromite/bin/setup_board" --board="$BOARD" || \
@@ -241,22 +257,39 @@ stage_packages() {
         fi
     fi
 
+    ensure_sudo
+
     banner "packages: cros build-packages --board=${BOARD}"
     log "this also runs setup_board for ${BOARD} (build-packages does it unless"
     log "--skip-setup-board is passed, and not skipping is the default)"
     log "first run takes roughly 90+ minutes and downloads several GB"
     # --autosetgov temporarily switches to the performance governor; --sticky makes
     # that the default for later runs.
-    cros_cmd build-packages --board="$BOARD" --autosetgov --autosetgov-sticky
+    #
+    # The || die matters because this script runs without `set -e`. Without it, a failed
+    # build-packages would fall through to build-image under the `all` stage, and build-image
+    # can succeed against a partially-populated sysroot -- producing an image that looks
+    # finished but is missing packages. That image could then be flashed.
+    cros_cmd build-packages --board="$BOARD" --autosetgov --autosetgov-sticky || \
+        die "build-packages failed for ${BOARD}; not continuing to build-image.
+
+     Nothing was built into an image, so there is no partial image to mistake for a
+     good one. Fix the reported package failure and re-run this stage."
 }
 
 stage_image() {
+    ensure_sudo
+
     banner "image: cros build-image --board=${BOARD} (${IMAGE_TYPE})"
     # --no-enable-rootfs-verification is required: we need a writable rootfs to load
     # an out-of-tree kernel module and to iterate on the graphics stack.
     # A test image also accepts SSH (password test0000), which is how we retrieve logs
     # when the display path is broken.
-    cros_cmd build-image --board="$BOARD" --no-enable-rootfs-verification "$IMAGE_TYPE"
+    cros_cmd build-image --board="$BOARD" --no-enable-rootfs-verification "$IMAGE_TYPE" || \
+        die "build-image failed for ${BOARD}.
+
+     Do not flash whatever is in src/build/images/${BOARD}/ -- if an older image is
+     still there, 'latest' may well point at it and look like a fresh success."
 
     local latest="${CROS_CHECKOUT}/src/build/images/${BOARD}/latest"
     if [ -d "$latest" ]; then
