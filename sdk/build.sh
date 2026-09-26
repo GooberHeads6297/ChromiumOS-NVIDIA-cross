@@ -141,6 +141,34 @@ stage_link() {
         log "board is amd64-generic (stock); no overlay to link"
     fi
 
+    # Install the board kernel flavour config into the kernel tree.
+    #
+    # This has to live in the kernel tree because that is the only place prepareconfig
+    # looks: cros-kernel.eclass passes CHROMEOS_KERNEL_SPLITCONFIG to
+    # chromeos/scripts/prepareconfig, which does
+    #     find chromeos/config/${family} -name <name>.flavour.config
+    # and concatenates base.config + <arch>/common.config + that file.
+    #
+    # Installed rather than patched because it is a new file, and a copy cannot conflict
+    # with an upstream change the way a patch hunk can.
+    if [ "$BOARD" != "amd64-generic" ]; then
+        local fl_src="${REPO_ROOT}/overlay/overlay-${BOARD}/kernel-config"
+        local kver="${KERNEL_VERSION:-v6.12}"
+        local fl_dst="${CROS_CHECKOUT}/src/third_party/kernel/${kver}/chromeos/config/chromeos/x86_64"
+        if [ -d "$fl_src" ] && [ -d "$fl_dst" ]; then
+            for f in "${fl_src}"/*.flavour.config; do
+                [ -e "$f" ] || continue
+                cp -f "$f" "${fl_dst}/" || die "could not install $(basename "$f") into ${fl_dst}"
+                log "installed $(basename "$f") -> ${fl_dst}/"
+            done
+        elif [ -d "$fl_src" ]; then
+            die "kernel config dir not found: ${fl_dst}
+     The board selects kernel ${kver}. If that is wrong, set KERNEL_VERSION.
+     Without this the board would silently fall back to a config with no amdgpu,
+     and the iGPU recovery console would not exist."
+        fi
+    fi
+
     # minigbm is a cros workon package, so its patch is applied to the checked-out
     # source tree rather than dropped into an ebuild files/ directory.
     local mg_src="${CROS_CHECKOUT}/src/platform/minigbm"
@@ -184,6 +212,21 @@ stage_setup() {
 }
 
 stage_packages() {
+    # The Raphael firmware is not in git (redistributable vendor blobs), so a fresh clone
+    # would otherwise fail deep inside the build with an ebuild die. Check it here, where
+    # the fix is one command away.
+    if [ "$BOARD" != "amd64-generic" ]; then
+        local rfw="${REPO_ROOT}/overlay/overlay-${BOARD}/sys-firmware/amdgpu-raphael-firmware/files"
+        if [ -d "$(dirname "$rfw")" ] && [ ! -e "${rfw}/gc_10_3_6_pfp.bin" ]; then
+            die "amdgpu GC 10.3.6 firmware is not staged.
+
+     Run:  ./tools/fetch-amdgpu-firmware.sh
+
+     Without it amdgpu cannot initialise this machine's Raphael iGPU, which is the
+     recovery console the Stage 2 bring-up depends on."
+        fi
+    fi
+
     banner "packages: cros build-packages --board=${BOARD}"
     log "this also runs setup_board for ${BOARD} (build-packages does it unless"
     log "--skip-setup-board is passed, and not skipping is the default)"

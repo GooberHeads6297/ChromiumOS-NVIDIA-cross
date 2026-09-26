@@ -136,10 +136,10 @@ if [ "$TARGET" = "usb" ]; then
     require_root
     cd "$CROS_CHECKOUT" || die "no checkout at ${CROS_CHECKOUT}"
 
-    # Prefer the explicit form so cros flash does not prompt. If this chromite version
-    # does not accept a device path under usb://, it fails before writing anything, and we
-    # fall back to the documented bare form -- with the device we validated printed, so
-    # there is a known-correct answer to match against at the prompt.
+    # The explicit form is supported: `cros flash --help` documents the positional device
+    # as "usb://[path]" and gives "cros flash usb:///dev/sde kevin/latest" as an example.
+    # The fallback below is kept only for a chromite that drops it, and it cannot write
+    # anything by itself.
     log "running: cros flash usb://${USB_DEVICE} ${BOARD}/latest"
     if ./chromite/bin/cros flash "usb://${USB_DEVICE}" "${BOARD}/latest"; then
         sync

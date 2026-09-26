@@ -14,12 +14,17 @@ IUSE="nvidia_open"
 # The BSP is what pulls the NVIDIA stack into the image. Gating on the nvidia_open USE
 # flag means an otherwise identical image can be built without the driver, which is
 # useful for isolating whether a problem is ours or ChromeOS's.
+#
+# The Raphael firmware is deliberately OUTSIDE that gate. It is what lets amdgpu drive the
+# iGPU, and the iGPU is the recovery console -- so it is most needed precisely when the
+# NVIDIA driver has been disabled or has failed.
 RDEPEND="
 	nvidia_open? (
 		x11-drivers/nvidia-open-drivers
 		x11-libs/nvidia-userspace
 		sys-firmware/nvidia-gsp-firmware
 	)
+	sys-firmware/amdgpu-raphael-firmware
 "
 DEPEND=""
 

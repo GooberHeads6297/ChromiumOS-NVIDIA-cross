@@ -4,6 +4,11 @@
 # Version, published sha256 and peeled tag commit are pinned in that script.
 /vendor/
 
+# amdgpu GC 10.3.6 (Raphael) firmware staged by tools/fetch-amdgpu-firmware.sh.
+# Redistributable vendor blobs under their own licence, and reproducible from either the
+# host or upstream linux-firmware, so they are not carried in git.
+/overlay/overlay-nvidia-generic/sys-firmware/amdgpu-raphael-firmware/files/*.bin
+
 # Thermal logs from safety/thermal-log.sh
 /thermal-*.csv
 

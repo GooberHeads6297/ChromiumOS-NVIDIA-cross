@@ -1,17 +1,97 @@
 # Board defaults for nvidia-generic.
 #
-# Inherits everything from amd64-generic (see profiles/base/parent); this file only
-# states what differs.
+# The parent is amd64-generic:kernel-6_12, not amd64-generic:base. That profile's own
+# parent chain is ../base plus chromiumos:features/kernel/deselect-all-kernels, so it
+# takes amd64-generic's settings, turns every kernel USE flag off, then enables
+# kernel-6_12. Inheriting :base instead would give kernel 5.15, which is what
+# amd64-generic/profiles/base/make.defaults selects.
+#
+# 6.12 is chosen because it is what patches/kernel/ was written against, and because the
+# NVIDIA 595.91.07 open modules are a 2025 release. NVIDIA's own floor is much lower
+# ("Linux kernel 4.15 or newer" per their README), so this is about matching our own
+# config work and having modern DRM, not about a hard requirement.
 
 # Mesa drivers to build. The iGPU path (amdgpu/radeonsi) is kept because it is the
 # recovery console and must always work -- Stage 2 deliberately keeps the display on
 # the iGPU while the NVIDIA driver is brought up.
 #
+# amd64-generic ships VIDEO_CARDS="intel llvmpipe nouveau radeon" with no amdgpu at all,
+# and radeon is the pre-GCN driver which will not bind to this machine's Raphael iGPU
+# [1002:164e]. Overriding this is what makes an iGPU console possible.
+#
 # nouveau is included as a *diagnostic* fallback, not the intended driver. If the
 # NVIDIA module misbehaves it lets us prove PCI enumeration, DRM/KMS and modesetting
 # independently. minigbm already ships a nouveau dumb-buffer backend, so this path
 # works without patches, which makes it a useful control experiment.
-VIDEO_CARDS="amdgpu radeonsi nouveau"
+#
+# llvmpipe is kept deliberately. This is not a stylistic carry-over from amd64-generic: in
+# media-libs/mesa it maps to "gallium_enable video_cards_llvmpipe swrast", so it is the
+# software rasteriser. It is the only GL that needs no working kernel driver at all, which
+# makes it the last line of the recovery story -- exactly the case where amdgpu has failed
+# and dropping it would leave nothing. VIDEO_CARDS is a plain assignment in
+# amd64-generic/profiles/base/make.defaults, so omitting llvmpipe here would remove it.
+#
+# radeon is dropped: it is the pre-GCN driver and cannot bind to Raphael. intel is dropped
+# because there is no Intel graphics on this machine. The leading -* is the idiom the
+# in-tree AMD boards use (chipset-cezanne has VIDEO_CARDS="-* radeon amdgpu") and makes the
+# clearing of inherited values explicit rather than relying on this being an assignment.
+#
+# Note what VIDEO_CARDS does NOT do here: it does not choose the GL implementation. See
+# virtual/opengles and virtual/vulkan-icd in this overlay -- ChromeOS ships split mesa
+# packages and the choice is made there. VIDEO_CARDS still matters for minigbm's backends,
+# for LICENSE selection, and for packages that gate on video_cards_* directly.
+VIDEO_CARDS="-* amdgpu radeonsi nouveau llvmpipe"
+
+# LLVM_TARGETS is deliberately not set. amd64-generic already has "AMDGPU X86", which is
+# what both mesa-amd (radeonsi needs the AMDGPU backend) and mesa-llvmpipe (needs X86) want.
+# chipset-cezanne narrows it to "AMDGPU" alone, which is why that board cannot fall back to
+# llvmpipe; inheriting the wider set is strictly better for us.
+
+# Board-specific kernel config. cros-kernel.eclass passes this name to
+# chromeos/scripts/prepareconfig, which builds .config by concatenating
+#   chromeos/config/chromeos/base.config
+#   chromeos/config/chromeos/x86_64/common.config
+#   chromeos/config/chromeos/x86_64/<this name>.flavour.config
+# in that order, so the flavour config wins on any duplicate symbol.
+#
+# The file is kept in this repo under overlay/overlay-nvidia-generic/kernel-config/ and
+# installed into the kernel tree by sdk/build.sh, because the kernel tree is a synced
+# repo rather than something we own.
+CHROMEOS_KERNEL_SPLITCONFIG="chromiumos-x86_64-nvidia"
 
 # Pull the NVIDIA stack into the image via the board BSP package.
 USE="${USE} nvidia_open"
+
+# glvnd is how a system carries more than one GL/EGL implementation at once: the vendor
+# neutral libEGL.so dispatches to an implementation chosen by vendor JSON files under
+# __EGL_VENDOR_LIBRARY_DIRS. Chrome needs Mesa for the iGPU and NVIDIA's own libEGL for
+# the RTX, so without glvnd they would collide over the same soname. reven sets this for
+# the same reason; amd64-generic does not.
+USE="${USE} libglvnd"
+
+# Flags every in-tree AMD board sets that amd64-generic does not, because amd64-generic is
+# a VM target rather than real AMD hardware.
+#
+# amd_cpu identifies the CPU vendor to packages that branch on it; this is a Ryzen 9 7900X.
+USE="${USE} amd_cpu"
+
+# GpuMemoryBuffers backed by dma-bufs. Without it Chrome falls back to shared-memory
+# transfers, which is a copy per frame and defeats the point of a discrete GPU.
+USE="${USE} native_gpu_memory_buffers"
+
+# amd64-generic explicitly sets -gpu_sandbox_start_early. Every real AMD board turns it back
+# on, because the GPU process spawns threads early and the sandbox has to be in place first.
+USE="${USE} gpu_sandbox_start_early"
+
+# AMD CPU microcode, for the Ryzen 9 7900X. amd64-generic sets LINUX_FIRMWARE="iwlwifi-all"
+# as a plain assignment, so this appends rather than replacing it.
+#
+# There is deliberately no "amdgpu" here. sys-kernel/linux-firmware's IUSE_LINUX_FIRMWARE
+# offers only amd_ucode, amdgpu_gc_11_0_1, amdgpu_gc_11_0_4 and amdgpu_yellow_carp -- there
+# is no general amdgpu flag, and video_cards_amdgpu only selects a LICENSE entry. So no USE
+# flag can install GPU firmware for this iGPU, and adding "amdgpu" would be a silently
+# ignored value that reads as though it did something.
+#
+# The iGPU's firmware therefore comes from sys-firmware/amdgpu-raphael-firmware in this
+# overlay, pulled in unconditionally by the board BSP.
+LINUX_FIRMWARE="${LINUX_FIRMWARE} amd_ucode"

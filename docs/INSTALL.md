@@ -93,7 +93,25 @@ minigbm patch for that board, so the baseline really is stock.
 ```
 
 The stage is positional; `--stage all` also works. Flash this to USB (Phase 2), confirm it
-boots (Phase 3), and only then build the real board:
+boots (Phase 3), and only then build the real board.
+
+### Stage the vendor blobs first
+
+Two sets of firmware are not in git, because they are vendor blobs under their own licences
+and both scripts reproduce them. `build.sh` refuses to start `build-packages` if either is
+missing, so this fails fast rather than several hours in:
+
+```bash
+./tools/fetch-nvidia.sh            # NVIDIA 595.91.07 bundle, ~500 MB
+./tools/fetch-amdgpu-firmware.sh   # amdgpu GC 10.3.6 (Raphael), 11 files, ~2.5 MB
+```
+
+The amdgpu set is taken from this host, which already drives the same iGPU, and
+decompressed from its `.zst` form; pass `--upstream` to clone `linux-firmware` instead, or
+`--verify` to check what is staged without changing anything. Without it amdgpu cannot
+initialise the iGPU — which is the recovery console the whole safety argument rests on.
+
+### Then the real board
 
 ```bash
 ./sdk/build.sh --board nvidia-generic all

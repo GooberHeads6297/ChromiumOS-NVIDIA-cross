@@ -112,6 +112,25 @@ bare-metal testing is low-risk: with the BIOS primary display set to the iGPU, a
 broken NVIDIA modeset costs a reboot rather than access to the machine.
 `preflight.sh` fails if `amdgpu` is not bound here.
 
+That safeguard holds on Ubuntu today. Getting it to hold on our ChromiumOS board took three
+separate changes, because `amd64-generic` is a VM target and supports none of this:
+
+1. **The kernel had no amdgpu.** `amd64-generic` ships `VIDEO_CARDS="intel llvmpipe nouveau
+   radeon"` and builds only `evdi`, `radeon` and `vkms` as DRM modules. `radeon` is the
+   pre-GCN driver and will not bind to Raphael. Our board kernel config sets
+   `CONFIG_DRM_AMDGPU=m`.
+2. **GL was software-rendered.** ChromeOS picks its GL driver through `virtual/opengles`,
+   not `VIDEO_CARDS`, and `amd64-generic` pins it to `mesa-llvmpipe`. This overlay overrides
+   it to `mesa-amd`, and `virtual/vulkan-icd` to `mesa-radv`. See `docs/architecture.md`.
+3. **The firmware does not exist in ChromeOS.** Raphael has no legacy firmware alias, so
+   amdgpu requests `gc_10_3_6_*`, `sdma_5_2_6`, `psp_13_0_5_*` and `vcn_3_1_2` by
+   IP-derived name, and ChromeOS's `linux-firmware` carries none of them — nor does it have
+   any USE flag that installs general amdgpu firmware. `sys-firmware/amdgpu-raphael-firmware`
+   supplies all eleven files; stage them with `tools/fetch-amdgpu-firmware.sh`.
+
+Every one of those eleven files is on a fatal path, so if the iGPU console is dead on the
+built image, check `dmesg` for failed `amdgpu/gc_10_3_6_*` requests first.
+
 ## CPU, memory, platform
 
 | Property | Value |
