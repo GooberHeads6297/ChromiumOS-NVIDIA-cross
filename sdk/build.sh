@@ -5,10 +5,10 @@
 #
 # Stages:
 #   link      symlink our board overlay into src/overlays and install patches
-#   setup     set up the board sysroot
-#   packages  cros build-packages
+#   setup     set up the board sysroot (optional; build-packages does this itself)
+#   packages  cros build-packages -- runs setup_board, then builds
 #   image     cros build-image
-#   all       everything above, in order
+#   all       link, packages, image
 #
 # Usage:
 #   ./sdk/build.sh --check                          # report state, change nothing
@@ -100,12 +100,21 @@ esac
 [ -n "$STAGE" ] || die "no stage given. One of: link setup packages image all (or --check)"
 [ -d "${CROS_CHECKOUT}/.repo" ] || die "no ChromiumOS checkout at ${CROS_CHECKOUT}; run ./sdk/bootstrap.sh"
 
+# Path the checkout is mounted at inside the chroot (constants.CHROOT_SOURCE_ROOT).
+CHROOT_SOURCE_ROOT=/mnt/host/source
+
 cros_cmd() {
     if command -v cros >/dev/null 2>&1; then
         ( cd "$CROS_CHECKOUT" && cros "$@" )
     else
         ( cd "$CROS_CHECKOUT" && ./chromite/bin/cros "$@" )
     fi
+}
+
+# Run a command inside the SDK chroot. Needed for the few entrypoints that refuse to run
+# outside it; the cros subcommands enter the chroot on their own.
+cros_sdk_cmd() {
+    ( cd "$CROS_CHECKOUT" && ./chromite/bin/cros_sdk -- "$@" )
 }
 
 # ---------------------------------------------------------------------------
@@ -151,19 +160,33 @@ stage_link() {
     fi
 }
 
+# setup: create the board sysroot.
+#
+# `cros setup-board` does not exist. It is not in chromite's subcommand list and there is
+# no cros_setup_board.py in chromite/cli/cros/. The surviving entrypoint is the
+# setup_board script, and chromite/service/sysroot.py raises NotInChrootError unless it is
+# run inside the chroot, so it has to go through cros_sdk. Referenced by absolute in-chroot
+# path from constants.CHROOT_SOURCE_ROOT ("/mnt/host/source") rather than trusting PATH.
+#
+# This stage is optional. `cros build-packages` runs setup_board itself unless told
+# --skip-setup-board, and not skipping is the default, so the `all` stage does not call
+# this. It stays available for setting up a sysroot without building into it.
 stage_setup() {
     banner "setup: board sysroot for ${BOARD}"
-    # setup-board is idempotent; --force would discard the sysroot, so it is not used.
-    cros_cmd setup-board --board="$BOARD" || \
-        die "setup-board failed.
+    log "note: 'all' does not run this; cros build-packages sets the board up itself"
+    # setup_board is idempotent; --force would discard the sysroot, so it is not used.
+    cros_sdk_cmd "${CHROOT_SOURCE_ROOT}/chromite/bin/setup_board" --board="$BOARD" || \
+        die "setup_board failed.
 
-     On Ubuntu 26.04 this is the most likely point for a host incompatibility.
+     This is a likely point for a host incompatibility on Ubuntu 26.04.
      If the error mentions user namespaces, setgroups, or python, use the container
      fallback:  ./sdk/bootstrap.sh --container"
 }
 
 stage_packages() {
     banner "packages: cros build-packages --board=${BOARD}"
+    log "this also runs setup_board for ${BOARD} (build-packages does it unless"
+    log "--skip-setup-board is passed, and not skipping is the default)"
     log "first run takes roughly 90+ minutes and downloads several GB"
     # --autosetgov temporarily switches to the performance governor; --sticky makes
     # that the default for later runs.
@@ -206,5 +229,7 @@ case "$STAGE" in
     setup)    stage_setup ;;
     packages) stage_packages ;;
     image)    stage_image ;;
-    all)      stage_link; stage_setup; stage_packages; stage_image ;;
+    # No stage_setup here on purpose: build-packages sets the board up itself, so running
+    # it separately would do the same work twice.
+    all)      stage_link; stage_packages; stage_image ;;
 esac
