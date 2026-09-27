@@ -6,8 +6,11 @@ EAPI=7
 DESCRIPTION="amdgpu GC 10.3.6 (Raphael) firmware missing from ChromeOS linux-firmware"
 HOMEPAGE="https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git"
 
-# linux-firmware ships these under LICENSE.amdgpu, a redistributable-with-notice licence.
-LICENSE="linux-fw-redistributable"
+# Must be a license name that exists under chromiumos-overlay/licenses/ (or
+# portage-stable/licenses/). "linux-fw-redistributable" is not one of them -- the
+# ChromeOS install hook then fails with "Failed Generating Licensing". The real
+# name for these blobs is LICENSE.amdgpu, same as linux-firmware uses.
+LICENSE="LICENSE.amdgpu"
 SLOT="0"
 KEYWORDS="-* amd64"
 IUSE=""
