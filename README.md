@@ -104,6 +104,7 @@ Full procedure with firmware settings and recovery paths: **[docs/INSTALL.md](do
 | `tools/flash.sh` | Image writer with a disk allowlist and label guard |
 | `tools/install-to-disk.sh` | USB-to-internal install; refuses Ubuntu by filesystem UUID |
 | [docs/HANDOFF.md](docs/HANDOFF.md) | **Start here. Current state, settled facts, and the next milestone** |
+| [docs/TEST-USB.md](docs/TEST-USB.md) | **After nvidia-generic builds: flash USB and dGPU console checks** |
 | [docs/INSTALL.md](docs/INSTALL.md) | **The runbook: USB, then internal disk, then Steam** |
 | [docs/architecture.md](docs/architecture.md) | Target stack, stage gates, known hard problems |
 | [docs/hardware.md](docs/hardware.md) | Measured hardware facts |
