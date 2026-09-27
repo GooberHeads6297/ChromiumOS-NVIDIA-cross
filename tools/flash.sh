@@ -16,11 +16,14 @@
 # order to flash it. A label survives unmounting, so it covers precisely that gap.
 #
 # Usage:
-#   sudo ./tools/flash.sh --board amd64-generic  --target usb --dry-run
-#   sudo ./tools/flash.sh --board amd64-generic  --target usb              # baseline test
-#   sudo ./tools/flash.sh --board nvidia-generic --target usb              # the real thing
-#   sudo ./tools/flash.sh --board nvidia-generic --target usb --device /dev/sdc
+#   ./tools/flash.sh --board amd64-generic  --target usb --dry-run
+#   ./tools/flash.sh --board amd64-generic  --target usb              # baseline test
+#   ./tools/flash.sh --board nvidia-generic --target usb              # the real thing
+#   ./tools/flash.sh --board nvidia-generic --target usb --device /dev/sdc
 #
+# Do NOT wrap this in sudo. cros flash refuses to run as root and sudoes for itself when
+# it needs to write the device. If you did use sudo, the script drops back to SUDO_USER
+# before calling it.
 # With --target usb the device is auto-detected when exactly one removable device is
 # present, and --device names it explicitly otherwise. Fixed disks are refused outright on
 # this path, so it cannot be aimed at sda, sdb or nvme1n1.
@@ -51,6 +54,18 @@ TARGET=""
 DRY_RUN=0
 IMAGE=""
 USB_DEVICE=""
+
+# cros flash dies with "This script cannot be run as root" and sudoes for itself when it
+# needs device write access. If this wrapper was started under sudo, drop back to the
+# invoking user before calling it; the safety checks above do not need root.
+run_as_invoker() {
+    if [ "$(id -u)" -eq 0 ]; then
+        [ -n "${SUDO_USER:-}" ] || die "running as root with no SUDO_USER; cannot call cros flash as root"
+        sudo -u "$SUDO_USER" -H -- "$@"
+    else
+        "$@"
+    fi
+}
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -142,7 +157,6 @@ if [ "$TARGET" = "usb" ]; then
     read -r reply
     [ "$reply" = "$USB_NAME" ] || die "confirmation did not match; nothing was written"
 
-    require_root
     cd "$CROS_CHECKOUT" || die "no checkout at ${CROS_CHECKOUT}"
 
     # The explicit form is supported: `cros flash --help` documents the positional device
@@ -150,7 +164,7 @@ if [ "$TARGET" = "usb" ]; then
     # The fallback below is kept only for a chromite that drops it, and it cannot write
     # anything by itself.
     log "running: cros flash usb://${USB_DEVICE} ${BOARD}/latest"
-    if ./chromite/bin/cros flash "usb://${USB_DEVICE}" "${BOARD}/latest"; then
+    if run_as_invoker ./chromite/bin/cros flash "usb://${USB_DEVICE}" "${BOARD}/latest"; then
         sync
         banner "flash complete"
         log "${USB_DEVICE} now holds ${BOARD}/latest"
@@ -164,7 +178,8 @@ if [ "$TARGET" = "usb" ]; then
     printf '\nProceed with the interactive prompt? [y/N] ' >&2
     read -r reply
     case "$reply" in y|Y) ;; *) die "aborted; nothing further was written" ;; esac
-    exec ./chromite/bin/cros flash "usb://" "${BOARD}/latest"
+    run_as_invoker ./chromite/bin/cros flash "usb://" "${BOARD}/latest"
+    exit $?
 fi
 
 TGT="${TARGET#/dev/}"
@@ -268,7 +283,7 @@ read -r reply
 cd "$CROS_CHECKOUT" || die "no checkout at ${CROS_CHECKOUT}"
 
 log "flashing..."
-if ./chromite/bin/cros flash "$DEV" "$IMAGE"; then
+if run_as_invoker ./chromite/bin/cros flash "$DEV" "$IMAGE"; then
     sync
     banner "flash complete"
     cat <<EOF
