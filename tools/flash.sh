@@ -85,14 +85,11 @@ done
 # ---------------------------------------------------------------------------
 # The USB path.
 #
-# Bare `cros flash usb://` prompts for the device and picks nothing itself, which means
-# the destination is decided by whoever reads that prompt. This branch used to exec
-# straight into it, so none of the five refusals below applied to the USB path at all --
-# the busiest path in the runbook was also the least guarded.
-#
-# So resolve and validate a specific device here, then hand cros flash an explicit target
-# instead of letting it ask. Auto-detection only ever accepts removable devices, and
-# refuses to guess when there is more than one candidate.
+# Resolve and validate a specific removable device here (never ask cros to pick one).
+# Writing is done with dd, not `cros flash`: on this host chromite dies with
+# "cannot pickle 'FileIO' instances" under the current system Python, before it writes
+# anything. A raw image write is the documented local-dev alternative and avoids that
+# entirely. Auto-detection only accepts removable=1, so this branch cannot hit sda/sdb/nvme.
 # ---------------------------------------------------------------------------
 if [ "$TARGET" = "usb" ]; then
     banner "flashing ${BOARD}/latest to USB"
@@ -142,44 +139,63 @@ if [ "$TARGET" = "usb" ]; then
         m="$(lsblk -dno MODEL "$USB_DEVICE" 2>/dev/null | sed 's/ *$//')"; [ -n "$m" ] && printf ', %s' "$m")), removable"
     lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT "$USB_DEVICE" 2>/dev/null | sed 's/^/       /'
 
+    # Locate the image before confirming, so a missing build fails without touching the stick.
+    if [ -z "$IMAGE" ]; then
+        latest="${CROS_CHECKOUT}/src/build/images/${BOARD}/latest"
+        for candidate in chromiumos_test_image.bin chromiumos_image.bin chromiumos_base_image.bin; do
+            if [ -f "${latest}/${candidate}" ]; then
+                IMAGE="${latest}/${candidate}"
+                break
+            fi
+        done
+    fi
+    [ -n "$IMAGE" ] && [ -f "$IMAGE" ] || die "no image found for ${BOARD}.
+
+     Build one with:  ./sdk/build.sh --board ${BOARD} all
+     Currently looking under: ${CROS_CHECKOUT}/src/build/images/${BOARD}/latest/"
+
     if [ "$DRY_RUN" -eq 1 ]; then
         labels="$(disk_fs_labels "$USB_DEVICE" | tr '\n' ' ')"
         [ -n "$labels" ] && warn "carries filesystem label(s): ${labels}"
         log "all USB safety checks passed; nothing was written"
-        log "WOULD RUN: cros flash usb://${USB_DEVICE} ${BOARD}/latest"
+        log "WOULD RUN: dd if=${IMAGE} of=${USB_DEVICE} bs=4M status=progress conv=fsync"
         exit 0
     fi
 
     confirm_if_labelled "$USB_DEVICE" || die "aborted at the label confirmation"
 
     warn "everything on ${USB_DEVICE} will be destroyed."
+    log "image: ${IMAGE} ($(du -h "$IMAGE" | cut -f1))"
     printf '\nType the device name (%s) to confirm: ' "$USB_NAME" >&2
     read -r reply
     [ "$reply" = "$USB_NAME" ] || die "confirmation did not match; nothing was written"
 
-    cd "$CROS_CHECKOUT" || die "no checkout at ${CROS_CHECKOUT}"
+    # Unmount any partitions still held by the desktop; dd refuses a busy device.
+    while read -r mp; do
+        [ -n "$mp" ] || continue
+        log "unmounting ${mp}"
+        udisksctl unmount -b "$mp" 2>/dev/null || sudo umount "$mp" 2>/dev/null || true
+    done < <(lsblk -lnpo NAME,MOUNTPOINT "$USB_DEVICE" | awk 'NF==2 {print $1}')
 
-    # The explicit form is supported: `cros flash --help` documents the positional device
-    # as "usb://[path]" and gives "cros flash usb:///dev/sde kevin/latest" as an example.
-    # The fallback below is kept only for a chromite that drops it, and it cannot write
-    # anything by itself.
-    log "running: cros flash usb://${USB_DEVICE} ${BOARD}/latest"
-    if run_as_invoker ./chromite/bin/cros flash "usb://${USB_DEVICE}" "${BOARD}/latest"; then
-        sync
-        banner "flash complete"
-        log "${USB_DEVICE} now holds ${BOARD}/latest"
-        exit 0
-    fi
+    log "writing image with dd (cros flash is broken on this host's Python; see HANDOFF)"
+    # dd needs root for the raw device. Prefer the caller's sudo so the password prompt is
+    # normal; if already root, just run it.
+    if [ "$(id -u)" -eq 0 ]; then
+        dd if="$IMAGE" of="$USB_DEVICE" bs=4M status=progress conv=fsync
+    else
+        sudo dd if="$IMAGE" of="$USB_DEVICE" bs=4M status=progress conv=fsync
+    fi || die "dd failed; ${USB_DEVICE} may be partially written. Re-run this command."
 
-    banner "explicit device form failed"
-    warn "this chromite may not accept a device path under usb://."
-    warn "Falling back to the prompting form. At the prompt, choose exactly:"
-    warn "    ${USB_DEVICE}"
-    printf '\nProceed with the interactive prompt? [y/N] ' >&2
-    read -r reply
-    case "$reply" in y|Y) ;; *) die "aborted; nothing further was written" ;; esac
-    run_as_invoker ./chromite/bin/cros flash "usb://" "${BOARD}/latest"
-    exit $?
+    sync
+    banner "flash complete"
+    log "${USB_DEVICE} now holds ${BOARD} from ${IMAGE}"
+    cat <<EOF
+
+Next: reboot, enter BIOS, boot the USB stick.
+Keep Primary Display on the iGPU / CPU Graphics. Monitor on the motherboard.
+SSH (test image): root / test0000
+EOF
+    exit 0
 fi
 
 TGT="${TARGET#/dev/}"
