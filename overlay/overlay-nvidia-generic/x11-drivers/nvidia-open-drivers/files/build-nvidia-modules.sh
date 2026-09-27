@@ -175,6 +175,12 @@ fi
 # ---------------------------------------------------------------------------
 # Build.
 # ---------------------------------------------------------------------------
+# Portage puts compiler-driver flags in LDFLAGS (-Wl,-O2, -Wl,--as-needed, ...). NVIDIA's
+# kbuild invokes ld.lld directly, so those -Wl,* tokens are fatal:
+#   ld.lld: error: unknown argument '-Wl,-O2'
+# Strip the Portage toolchain env so only the kernel's own flags reach the linker.
+unset LDFLAGS CFLAGS CXXFLAGS CPPFLAGS HOSTLDFLAGS HOSTCFLAGS || true
+
 log "building modules (SYSSRC=${KSRC} SYSOUT=${KOUT} -j${JOBS})"
 
 make -C "$OGKM" modules \

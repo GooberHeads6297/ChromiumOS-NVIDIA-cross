@@ -31,16 +31,18 @@
 # and dropping it would leave nothing. VIDEO_CARDS is a plain assignment in
 # amd64-generic/profiles/base/make.defaults, so omitting llvmpipe here would remove it.
 #
-# radeon is dropped: it is the pre-GCN driver and cannot bind to Raphael. intel is dropped
+# radeon stays in VIDEO_CARDS even though the kernel radeon driver cannot bind to Raphael.
+# mesa-amd's meson still requires pkg-config libdrm_radeon (media-libs/mesa-amd-23.0.2
+# meson.build:1755), and libdrm only builds that .pc when video_cards_radeon is on.
+# chipset-cezanne has the same pair: VIDEO_CARDS="-* radeon amdgpu". intel is dropped
 # because there is no Intel graphics on this machine. The leading -* is the idiom the
-# in-tree AMD boards use (chipset-cezanne has VIDEO_CARDS="-* radeon amdgpu") and makes the
-# clearing of inherited values explicit rather than relying on this being an assignment.
+# in-tree AMD boards use and makes the clearing of inherited values explicit.
 #
 # Note what VIDEO_CARDS does NOT do here: it does not choose the GL implementation. See
 # virtual/opengles and virtual/vulkan-icd in this overlay -- ChromeOS ships split mesa
 # packages and the choice is made there. VIDEO_CARDS still matters for minigbm's backends,
 # for LICENSE selection, and for packages that gate on video_cards_* directly.
-VIDEO_CARDS="-* amdgpu radeonsi nouveau llvmpipe"
+VIDEO_CARDS="-* amdgpu radeonsi radeon nouveau llvmpipe"
 
 # LLVM_TARGETS is deliberately not set. amd64-generic already has "AMDGPU X86", which is
 # what both mesa-amd (radeonsi needs the AMDGPU backend) and mesa-llvmpipe (needs X86) want.
@@ -82,6 +84,13 @@ USE="${USE} native_gpu_memory_buffers"
 # amd64-generic explicitly sets -gpu_sandbox_start_early. Every real AMD board turns it back
 # on, because the GPU process spawns threads early and the sandbox has to be in place first.
 USE="${USE} gpu_sandbox_start_early"
+
+# cros-kernel.eclass treats these as optional kernel fragments. If they are off, it
+# *disables* CONFIG_FRAMEBUFFER_CONSOLE / CONFIG_VT after prepareconfig, which is what
+# happened on the first nvidia-generic kernel build ("disabling framebuffer console",
+# "disabling VT console"). Without both of these there is no text console on any GPU,
+# which is the entire dGPU-first milestone. Flavour config setting them y is not enough.
+USE="${USE} fbconsole vtconsole"
 
 # AMD CPU microcode, for the Ryzen 9 7900X. amd64-generic sets LINUX_FIRMWARE="iwlwifi-all"
 # as a plain assignment, so this appends rather than replacing it.
