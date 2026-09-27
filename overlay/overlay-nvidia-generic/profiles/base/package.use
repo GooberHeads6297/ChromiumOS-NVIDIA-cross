@@ -1,0 +1,7 @@
+# Global USE=vulkan is inherited from amd64-generic. mesa-amd has an optional vulkan
+# flag that builds RADV into the same package; that flag conflicts with
+# media-libs/mesa-radv (each blocks the other).
+#
+# We want the split used by every real AMD board: mesa-amd for GL/EGL (radeonsi),
+# mesa-radv for the Vulkan ICD. So pin mesa-amd to -vulkan.
+media-libs/mesa-amd -vulkan
