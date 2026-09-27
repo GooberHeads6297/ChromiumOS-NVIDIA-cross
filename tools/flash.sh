@@ -36,7 +36,16 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 load_limits
 
-CROS_CHECKOUT="${CROS_CHECKOUT:-${HOME}/chromiumos}"
+# Under sudo, HOME becomes /root. The checkout lives in the invoking user's home
+# (SUDO_USER), not root's. Without this, `sudo ./tools/flash.sh` dies looking for
+# /root/chromiumos even when ~/chromiumos is fine.
+if [ -n "${SUDO_USER:-}" ] && [ "$(id -u)" -eq 0 ]; then
+    INVOKER_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+    [ -n "$INVOKER_HOME" ] || INVOKER_HOME="$HOME"
+else
+    INVOKER_HOME="$HOME"
+fi
+CROS_CHECKOUT="${CROS_CHECKOUT:-${INVOKER_HOME}/chromiumos}"
 BOARD=nvidia-generic
 TARGET=""
 DRY_RUN=0
