@@ -40,6 +40,9 @@ src_install() {
 	insinto /usr/share/chromiumos-nvidia-cross
 	doins "${FILESDIR}/limits.conf"
 
+	# USB -> internal disk installer (run on the live ChromiumOS device, never from Ubuntu).
+	dosbin "${FILESDIR}/install-to-disk.sh"
+
 	# Upstart is ChromeOS's init system.
 	insinto /etc/init
 	doins "${FILESDIR}/gpu-guard.conf"
@@ -56,4 +59,5 @@ pkg_postinst() {
 	elog ""
 	elog "The GPU thermal watchdog starts automatically once /dev/nvidia0 exists."
 	elog "Check it with:  status gpu-guard  /  tail -f /var/log/gpu-guard.log"
+	elog "Install to internal disk (on-device):  install-to-disk.sh --dst /dev/<disk> --dry-run"
 }

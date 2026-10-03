@@ -368,7 +368,14 @@ From `SAFETY.md` and `safety/limits.conf`. The user has one RTX 4070 Ti SUPER.
 
 ---
 
-## 7. Still genuinely unsolved (do not start here)
+## 7. Local accounts / cryptohome (openFyde-informed)
+
+See [`docs/LOCAL-ACCOUNTS.md`](LOCAL-ACCOUNTS.md). USB vaults do **not** carry to NVMe —
+create the account after `install-to-disk.sh`. Package `nvidia-generic-auth` ships
+`/usr/sbin/create-local-account.sh`, HTTP UI on `:17891`, and a Chrome extension; login_manager
+is patched (via `patches/login_manager/`) to skip Gaia and load the extension.
+
+## 8. Still genuinely unsolved (do not start here)
 
 **Stage 3: Chrome's Ozone/EGL on NVIDIA.** ChromeOS's graphics path assumes Mesa's EGL and
 minigbm's allocator; NVIDIA ships its own EGL plus `libnvidia-egl-gbm` and
@@ -381,7 +388,7 @@ This is the real research risk in the project, and §5 is deliberately scoped to
 
 ---
 
-## 8. Files worth reading, in order
+## 9. Files worth reading, in order
 
 | Path | Why |
 | --- | --- |
@@ -393,7 +400,7 @@ This is the real research risk in the project, and §5 is deliberately scoped to
 | `patches/kernel/README.md` | How board kernel config actually works, and the four false blockers |
 | `overlay/overlay-nvidia-generic/profiles/base/make.defaults` | Board settings, each with rationale |
 
-## 9. Outstanding user-side actions
+## 10. Outstanding user-side actions
 
 - Run the §5.3 step 1 gate in a real terminal and report the output.
 - Nothing has been flashed or installed yet. No disk has been written.

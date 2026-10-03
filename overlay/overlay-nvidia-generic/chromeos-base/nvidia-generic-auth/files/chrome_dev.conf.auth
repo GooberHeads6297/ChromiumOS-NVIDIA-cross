@@ -1,0 +1,15 @@
+# Chrome flags for offline / local-account bring-up on nvidia-generic.
+#
+# Applied by login_manager (board patch always ApplyUserConfig) and also merged
+# into /etc/chrome_dev.conf by nvidia-generic-auth-chrome.conf on test images.
+#
+# Do NOT pass --load-extension here. Login/OOBE Chrome cannot host an MV3
+# extension; it crashes and ChromeOS powerwashes.
+#
+# Do NOT use the on-screen "Create local account" → Next button. That is
+# Chrome's Gaia-fallback UI and crashes without Google API keys.
+# Create users on VT2: create-local-account.sh --user localuser@localhost ...
+
+--oobe-skip-to-login
+--allow-failed-policy-fetch-for-test
+--disable-gaia-services

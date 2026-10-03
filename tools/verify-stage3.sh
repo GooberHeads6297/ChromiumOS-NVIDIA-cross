@@ -31,7 +31,7 @@ ms="$(cat /sys/module/nvidia_drm/parameters/modeset 2>/dev/null || echo missing)
 case "$ms" in
     Y|1) ok "nvidia_drm modeset=${ms}" ;;
     N|0) bad "nvidia_drm modeset=${ms}. Stage 3 needs modeset=1.
-          Edit /etc/modprobe.d/nvidia-modeset-off.conf and reboot." ;;
+          Edit /etc/modprobe.d/nvidia-modeset.conf and reboot." ;;
     *)   bad "nvidia_drm not loaded" ;;
 esac
 
@@ -191,6 +191,6 @@ This is the hardest stage; a failure here is expected at least once. Diagnostics
   dmesg | grep -iE 'nvrm|nvidia-drm'
 
 If the display is black, you still have the iGPU console -- that is why Stage 2 kept it.
-To retreat, set modeset=0 in /etc/modprobe.d/nvidia-modeset-off.conf and reboot.
+To retreat, set modeset=0 in /etc/modprobe.d/nvidia-modeset.conf and reboot.
 EOF
 exit 1

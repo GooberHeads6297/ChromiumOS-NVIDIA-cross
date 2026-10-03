@@ -181,6 +181,18 @@ fi
 # Strip the Portage toolchain env so only the kernel's own flags reach the linker.
 unset LDFLAGS CFLAGS CXXFLAGS CPPFLAGS HOSTLDFLAGS HOSTCFLAGS || true
 
+# ChromeOS kbuild uses -nostdinc. NVIDIA's nv_stdarg.h falls back to <stdarg.h> when
+# conftest does not set NV_LINUX_STDARG_H_PRESENT; without the clang resource dir that
+# include fails. Prefer linux/stdarg.h when present, and always expose clang's stdarg.h.
+EXTRA_CFLAGS=( -DNV_LINUX_STDARG_H_PRESENT )
+if command -v x86_64-cros-linux-gnu-clang >/dev/null 2>&1; then
+    clang_inc="$(x86_64-cros-linux-gnu-clang -print-file-name=include 2>/dev/null || true)"
+    [ -n "$clang_inc" ] && [ -d "$clang_inc" ] && EXTRA_CFLAGS+=( -isystem "${clang_inc}" )
+elif command -v clang >/dev/null 2>&1; then
+    clang_inc="$(clang -print-file-name=include 2>/dev/null || true)"
+    [ -n "$clang_inc" ] && [ -d "$clang_inc" ] && EXTRA_CFLAGS+=( -isystem "${clang_inc}" )
+fi
+
 log "building modules (SYSSRC=${KSRC} SYSOUT=${KOUT} -j${JOBS})"
 
 make -C "$OGKM" modules \
@@ -189,6 +201,7 @@ make -C "$OGKM" modules \
     SYSOUT="$KOUT" \
     ARCH=x86_64 \
     NV_VERBOSE=1 \
+    EXTRA_CFLAGS="${EXTRA_CFLAGS[*]}" \
     || die "module build failed.
 
        If the failure mentions CFI, LTO, or an unresolved symbol, it is the ChromeOS

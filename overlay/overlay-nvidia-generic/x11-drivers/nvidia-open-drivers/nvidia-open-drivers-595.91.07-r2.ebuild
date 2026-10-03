@@ -108,9 +108,10 @@ src_install() {
 	insinto /etc/modprobe.d
 	doins "${FILESDIR}/nvidia.conf"
 
-	# Stage 2 loads the driver with modesetting OFF so the display stays on the iGPU.
-	# Stage 3 flips this. Keeping it in a separate file makes the transition one edit.
-	doins "${FILESDIR}/nvidia-modeset-off.conf"
+	# Dual-output default: modeset=1 fbdev=1 on the RTX while amdgpu keeps the
+	# motherboard console. Installed as nvidia-modeset.conf (not the old
+	# nvidia-modeset-off.conf name from before the revision bump).
+	newins "${FILESDIR}/nvidia-modeset.conf" nvidia-modeset.conf
 
 	# Device nodes. ChromeOS has no nvidia-modprobe running as root at login, so the
 	# nodes are created by udev instead.
@@ -121,14 +122,13 @@ src_install() {
 pkg_postinst() {
 	elog "NVIDIA open kernel modules ${PV} installed."
 	elog ""
-	elog "Modesetting is DISABLED by default (/etc/modprobe.d/nvidia-modeset-off.conf)."
-	elog "That is the Stage 2 configuration: the driver loads fully while the iGPU keeps"
-	elog "the console, so a broken NVIDIA display path cannot lock you out."
+	elog "Modesetting is ENABLED (/etc/modprobe.d/nvidia-modeset.conf):"
+	elog "    options nvidia-drm modeset=1 fbdev=1"
+	elog "Keep a monitor on the motherboard (amdgpu recovery console) and one on the RTX."
 	elog ""
-	elog "Stage 2 gate, from the ChromeOS shell:"
+	elog "Driver + iGPU gate:"
 	elog "    lspci -k | grep -A3 10de:2705    # driver in use should be 'nvidia'"
-	elog "    ls /dev/nvidia*                  # nvidia0, nvidiactl, nvidia-uvm"
+	elog "    lspci -k | grep -A3 1002:164e    # iGPU should be 'amdgpu'"
+	elog "    cat /sys/module/nvidia_drm/parameters/modeset   # expect Y or 1"
 	elog "    nvidia-smi                       # should report the 4070 Ti SUPER"
-	elog ""
-	elog "Only once that passes, move to Stage 3 and enable modesetting."
 }

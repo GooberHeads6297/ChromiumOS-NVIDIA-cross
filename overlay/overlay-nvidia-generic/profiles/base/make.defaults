@@ -92,6 +92,30 @@ USE="${USE} gpu_sandbox_start_early"
 # which is the entire dGPU-first milestone. Flavour config setting them y is not enough.
 USE="${USE} fbconsole vtconsole"
 
+# ---------------------------------------------------------------------------
+# Cryptohome / TPM (dual-boot with Ubuntu owning the hardware TPM)
+# ---------------------------------------------------------------------------
+# amd64-generic already selects a software TPM2 simulator + vtpm_proxy. Affirm those
+# flags here (openFyde PC boards do the same) so a parent-profile change cannot silently
+# re-enable the hardware TPM path and break vault mounts on this machine.
+#
+# Do NOT enable tpm2_simulator_deprecated / tpm_insecure_fallback unless diagnosis shows
+# the modern simulator stack is insufficient — those are the older openFyde lockbox path.
+USE="${USE} -tpm_dynamic -tpm tpm2 tpm2_simulator tpm2_simulator_manufacturer"
+USE="${USE} vtpm_proxy"
+
+# Land on the login pod instead of the full OOBE wizard. Combined with
+# chrome_dev.conf.auth (nvidia-generic-auth) this avoids a Gaia-only brick when API keys
+# are absent. Local vaults are still created via create-local-account.sh (SSH) until a
+# chromeos-chrome OOBE button exists.
+USE="${USE} oobe_skip_to_login"
+
+# Crostini / Linux development environment host side. Inherited from amd64-generic
+# (containers kvm_host crosvm-gpu virtio_gpu); affirmed so a parent-profile change cannot
+# silently drop VM support. Guest sessions still gray out Linux — that is ChromeOS policy,
+# not a missing USE flag. Persistent local users get Settings → Linux after login.
+USE="${USE} containers kvm_host"
+
 # AMD CPU microcode, for the Ryzen 9 7900X. amd64-generic sets LINUX_FIRMWARE="iwlwifi-all"
 # as a plain assignment, so this appends rather than replacing it.
 #

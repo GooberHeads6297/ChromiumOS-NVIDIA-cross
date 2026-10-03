@@ -181,8 +181,13 @@ sync_project_into_checkout() {
 
     # --delete so a file removed here is removed there; a stale ebuild in the checkout would
     # otherwise keep being built. Excludes are editor and VCS noise only.
+    #
+    # -L copies symlink targets as real files. The BSP files/ directory links gpu-guard.sh,
+    # lib-common.sh and limits.conf at safety/ in this repo. A preserved symlink still points
+    # there after the copy, which is outside the checkout and invisible in the chroot, so
+    # doexe dies with "cannot stat .../files/gpu-guard.sh".
     log "syncing overlay -> ${OVERLAY_DST}"
-    rsync -a --delete \
+    rsync -aL --delete \
         --exclude '.git' --exclude '*.swp' --exclude '*~' \
         "${OVERLAY_SRC}/" "${OVERLAY_DST}/" \
         || die "rsync of the overlay into ${OVERLAY_DST} failed"
@@ -266,6 +271,25 @@ stage_link() {
         fi
     elif [ "$BOARD" != "amd64-generic" ]; then
         warn "minigbm source not found at ${mg_src}; skipping patch (run repo sync?)"
+    fi
+
+    # login_manager: de-Google first boot + always honour chrome_dev.conf.
+    # Applied to platform2 like minigbm so emerge chromeos-login picks it up.
+    # Do not pass --load-extension at login (OOBE crash / powerwash).
+    local lm_src="${CROS_CHECKOUT}/src/platform2"
+    local lm_patch="${REPO_ROOT}/patches/login_manager/nvidia-generic-local-accounts.patch"
+    if [ "$BOARD" != "amd64-generic" ] && [ -d "${lm_src}/login_manager" ] && [ -f "$lm_patch" ]; then
+        if git -C "$lm_src" apply --check "$lm_patch" 2>/dev/null; then
+            log "applying login_manager local-account patch"
+            git -C "$lm_src" apply "$lm_patch"
+        elif git -C "$lm_src" apply --reverse --check "$lm_patch" 2>/dev/null; then
+            log "login_manager local-account patch already applied"
+        else
+            warn "login_manager patch does not apply cleanly against ${lm_src}/login_manager."
+            warn "Upstream has probably moved. Rebase patches/login_manager/ before continuing."
+        fi
+    elif [ "$BOARD" != "amd64-generic" ]; then
+        warn "platform2/login_manager not found; skipping local-account patch"
     fi
 }
 

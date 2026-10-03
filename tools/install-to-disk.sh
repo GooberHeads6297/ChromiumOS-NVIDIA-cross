@@ -19,12 +19,15 @@ set -eu
 
 SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-# On the device the safety files are installed flat beside the tools; in the repo they
-# live in ../safety. Accept either.
-for cand in "${SELF_DIR}/../safety" "${SELF_DIR}"; do
+# On the device: packaged under /usr/share/chromiumos-nvidia-cross (BSP).
+# In the repo / on a xfer USB: ../safety or same directory as this script.
+for cand in \
+    /usr/share/chromiumos-nvidia-cross \
+    "${SELF_DIR}/../safety" \
+    "${SELF_DIR}"; do
     if [ -r "${cand}/limits.conf" ]; then SAFETY_DIR="$cand"; break; fi
 done
-: "${SAFETY_DIR:?cannot locate limits.conf next to or above $0}"
+: "${SAFETY_DIR:?cannot locate limits.conf (tried /usr/share/chromiumos-nvidia-cross, ../safety, ${SELF_DIR})}"
 
 log()    { printf '[install] %s\n' "$*"; }
 warn()   { printf '[install] WARN: %s\n' "$*" >&2; }

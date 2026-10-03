@@ -222,6 +222,28 @@ the UI comes up looking fine and you conclude it worked.
 **If Stage 3 fails, stop and fix it before Phase 4.** Installing a broken graphics stack
 to the internal disk just means debugging the same problem with a slower edit loop.
 
+### Local account (no Google / no FydeOS cloud)
+
+Dual-boot leaves the hardware TPM with Ubuntu. The image uses the software TPM2 simulator
+(`tpm2_simulator` + `vtpm_proxy`) and ships `chromeos-base/nvidia-generic-auth`.
+
+**USB vaults do not transfer to NVMe.** Create the account again after
+`install-to-disk.sh`. Full write-up: [`docs/LOCAL-ACCOUNTS.md`](LOCAL-ACCOUNTS.md).
+
+```bash
+# On the device (root / test0000), after UI is up enough for cryptohomed:
+ensure-software-tpm.sh
+# GUI: open http://127.0.0.1:17891/  (or the Local Account extension)
+# CLI:
+create-local-account.sh --user localuser@localhost --password 'choose-a-password'
+# reboot, then sign in as localuser@localhost at the login screen
+/usr/share/chromiumos-nvidia-cross/verify-local-account.sh \
+    --user localuser@localhost --password 'choose-a-password'
+```
+
+Diagnosis dump: `/usr/share/chromiumos-nvidia-cross/collect-auth-debug.sh` (also
+`tools/collect-auth-debug.sh` on the host). See `docs/research-openfyde-auth.md`.
+
 ---
 
 ## Phase 4 — Install to the internal disk

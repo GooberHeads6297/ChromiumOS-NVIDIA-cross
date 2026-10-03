@@ -34,6 +34,7 @@ IUSE=""
 # would remove the firmware every other device on the board needs.
 RDEPEND="
 	chromeos-base/chromeos-bsp-nvidia-generic
+	chromeos-base/nvidia-generic-auth
 	!chromeos-base/chromeos-bsp-null
 	sys-kernel/linux-firmware
 "

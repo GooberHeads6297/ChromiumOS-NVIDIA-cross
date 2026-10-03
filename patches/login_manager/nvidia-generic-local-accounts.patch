@@ -1,0 +1,23 @@
+diff --git a/login_manager/chrome_setup.cc b/login_manager/chrome_setup.cc
+index 321151f4c2..8f0b471bbb 100644
+--- a/login_manager/chrome_setup.cc
++++ b/login_manager/chrome_setup.cc
+@@ -547,8 +547,17 @@ std::optional<ChromeSetup::Result> ChromeSetup::Run() {
+   AddCuttlefishFlags(&builder);
+   AddSquidFlags(&builder);
+ 
++  // nvidia-generic: skip Gaia OOBE and allow offline policy failure.
++  // Local vaults: create-local-account.sh on VT2. Do not use Chrome's
++  // "Create local account" Next button (crashes / powerwash without API keys).
++  builder.AddArg("--oobe-skip-to-login");
++  builder.AddArg("--disable-gaia-services");
++  builder.AddArg("--allow-failed-policy-fetch-for-test");
++
+   // Apply any modifications requested by the developer.
+-  if (builder.is_developer_end_user()) {
++  // Always apply chrome_dev.conf so offline/local-account flags work even when
++  // the end-user bit is not set (openFyde-style).
++  {
+     builder.ApplyUserConfig(base::FilePath(kChromeDevConfigPath),
+                             disallowed_prefixes);
+   }

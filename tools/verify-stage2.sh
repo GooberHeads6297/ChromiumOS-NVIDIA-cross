@@ -64,18 +64,22 @@ for m in nvidia nvidia_modeset nvidia_uvm; do
     fi
 done
 
-# nvidia_drm is expected to be loaded but NOT driving a display in Stage 2.
+# nvidia_drm should be loaded. Dual-output images use modeset=1; older Stage 2
+# images kept modeset=0 so the iGPU alone owned the display. Both are acceptable
+# here as long as the driver stack is healthy and amdgpu still binds the iGPU.
 if lsmod 2>/dev/null | grep -q '^nvidia_drm '; then
     ok "nvidia_drm loaded"
     ms="$(cat /sys/module/nvidia_drm/parameters/modeset 2>/dev/null || echo '?')"
     case "$ms" in
-        N|0) ok "nvidia_drm modeset=${ms} -- correct for Stage 2 (no display handover yet)" ;;
-        Y|1) note "nvidia_drm modeset=${ms}. That is Stage 3 configuration, not Stage 2.
-          Fine if deliberate, but this gate is meant to pass with modesetting off." ;;
+        N|0) ok "nvidia_drm modeset=${ms} -- driver-only (no NVIDIA display handover)" ;;
+        Y|1) ok "nvidia_drm modeset=${ms} -- dual-output (RTX modeset + iGPU recovery)"
+             fb="$(cat /sys/module/nvidia_drm/parameters/fbdev 2>/dev/null || echo '?')"
+             [ "$fb" = "Y" ] || [ "$fb" = "1" ] && ok "nvidia_drm fbdev=${fb}" \
+                                                || note "nvidia_drm fbdev=${fb}; no fbdev console on the RTX" ;;
         *)   note "could not read nvidia_drm modeset parameter" ;;
     esac
 else
-    note "nvidia_drm not loaded (acceptable in Stage 2; required for Stage 3)"
+    note "nvidia_drm not loaded (acceptable for driver-only bring-up; required for RTX display)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -134,16 +138,16 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-hdr "6. Display ownership -- must still be the iGPU"
+hdr "6. Display ownership -- iGPU recovery must still be present"
 # ---------------------------------------------------------------------------
 igpu_drv="$(basename "$(readlink -f "/sys/bus/pci/devices/${IGPU_ADDR}/driver" 2>/dev/null)" 2>/dev/null || echo none)"
 if [ "$igpu_drv" = "amdgpu" ]; then
-    ok "iGPU bound to amdgpu -- the console is safe"
+    ok "iGPU bound to amdgpu -- the recovery console is safe"
 else
     bad "iGPU driver is '${igpu_drv}', expected amdgpu. The recovery console is not guaranteed."
 fi
 
-# In Stage 2 the only DRM card should be the iGPU's.
+# Dual-output images may also register an nvidia DRM card beside amdgpu.
 if [ -d /sys/class/drm ]; then
     for c in /sys/class/drm/card[0-9]*; do
         [ -e "$c" ] || continue

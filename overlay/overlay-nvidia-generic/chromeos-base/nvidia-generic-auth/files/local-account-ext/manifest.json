@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "NVIDIA-generic Local Account",
+  "version": "0.1.0",
+  "description": "De-Googled local account setup UI for nvidia-generic",
+  "action": {
+    "default_title": "Create local account",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1:17891/*"]
+}
