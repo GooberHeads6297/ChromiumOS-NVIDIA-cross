@@ -8,8 +8,12 @@
 #
 # Do NOT use the on-screen "Create local account" → Next button. That is
 # Chrome's Gaia-fallback UI and crashes without Google API keys.
-# Create users on VT2: create-local-account.sh --user localuser@localhost ...
+# Create users on VT2 or http://127.0.0.1:17891/ (local-password factor).
+# Do not enable --allow-os-install (Flex auto-picks a disk and can erase Ubuntu).
 
 --oobe-skip-to-login
 --allow-failed-policy-fetch-for-test
 --disable-gaia-services
+# Offline password pod for localuser@localhost (AuthFactor label local-password).
+# Without this, UNKNOWN OAuthTokenStatus forces Google verification UI.
+--skip-force-online-signin-for-testing

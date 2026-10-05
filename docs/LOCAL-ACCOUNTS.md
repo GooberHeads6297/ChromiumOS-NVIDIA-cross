@@ -34,7 +34,7 @@ successful `rebuild-auth-image.sh` flash)
 2. On the **ChromiumOS USB shell** (not Ubuntu):  
    `install-to-disk.sh --dst /dev/<nvme> --dry-run` then real install (never Ubuntu’s disk).
 3. Reboot into NVMe → **create the local account again** → offline sign-in.
-4. Drive-picker GUI installer is a later milestone; shell install stays the path for now.
+4. Drive-picker GUI: Guest on USB → http://127.0.0.1:17891/ (never Flex `--allow-os-install`).
 
 | On-device command | Package |
 | --- | --- |
@@ -44,6 +44,31 @@ successful `rebuild-auth-image.sh` flash)
 Step-by-step gate: [`tools/gate-local-linux-nvme.md`](../tools/gate-local-linux-nvme.md).
 
 ## How to create a local user (this image)
+
+### GUI (http://127.0.0.1:17891/)
+
+On the **live USB**, Guest may open that URL: pick the NVMe, dry-run, type `erase DISKNAME`,
+install. Ubuntu is refused by filesystem UUID. Do **not** enable ChromeOS Flex
+`--allow-os-install`.
+
+After reboot from NVMe, open the same URL (not Guest) and set the password for
+`localuser@localhost`. The AuthFactor label is **`local-password`** (the HTTP UI
+passes `--key-label local-password` into `create-local-account.sh`).
+
+Chrome’s login pod shows a **password** field only when Local State has
+`OAuthTokenStatus[email]=4` (VALID) and `UserForceOnlineSignin=false`. Without
+that, Ash treats the regular user as needing Google verification. `register-local-login.sh`
+writes those prefs; `/etc/chrome_dev.conf` also includes
+`--skip-force-online-signin-for-testing` and `--disable-gaia-services`.
+
+If the installed disk was created before that fix (no image rebuild needed):
+
+```bash
+# From Ubuntu, with the ChromiumOS NVMe idle:
+sudo ./tools/copy-auth-to-disk.sh /dev/nvme0n1
+```
+
+VT2 also prints the URL.
 
 ### CLI (always works once the package is in the image)
 
@@ -55,14 +80,29 @@ Step-by-step gate: [`tools/gate-local-linux-nvme.md`](../tools/gate-local-linux-
 ensure-software-tpm.sh
 cryptohome --action=unmount
 # If a previous attempt half-created the user:
-create-local-account.sh --force-remove --user localuser@localhost --password 'choose-a-password' --key-label gaia
-# Otherwise:
-create-local-account.sh --user localuser@localhost --password 'choose-a-password' --key-label gaia
-# reboot, sign in as localuser@localhost (Chrome looks up the gaia password factor)
+create-local-account.sh --force-remove --user localuser@localhost --password 'choose-a-password'
+# Otherwise (default key label is local-password):
+create-local-account.sh --user localuser@localhost --password 'choose-a-password'
+# reboot, sign in as localuser@localhost
 ```
 
 If `create-local-account.sh` is missing, this USB was built before `nvidia-generic-auth`
 landed. Rebuild/flash with `./tools/rebuild-auth-image.sh --flash /dev/sdc`.
+
+### Login shows Google verification instead of a password field
+
+That means Ash chose `ONLINE_SIGN_IN` because `OAuthTokenStatus` was missing or
+invalid for a regular user. Fix without rebuilding:
+
+```bash
+sudo ./tools/copy-auth-to-disk.sh /dev/nvme0n1   # from Ubuntu
+# or on-device after account create:
+register-local-login.sh --user localuser@localhost
+restart ui
+```
+
+Confirm Local State has `"OAuthTokenStatus": { "localuser@localhost": 4 }` and
+`chrome_dev.conf` has `--skip-force-online-signin-for-testing`.
 
 ### Do not use Chrome “Create local account” → Next
 

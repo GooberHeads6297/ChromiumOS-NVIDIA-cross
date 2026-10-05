@@ -1,0 +1,55 @@
+diff --git a/ui/ozone/platform/drm/common/drm_wrapper.cc b/ui/ozone/platform/drm/common/drm_wrapper.cc
+index 5da3eaf211706..bcc8a39258412 100644
+--- a/ui/ozone/platform/drm/common/drm_wrapper.cc
++++ b/ui/ozone/platform/drm/common/drm_wrapper.cc
+@@ -12,6 +12,7 @@
+ 
+ #include <algorithm>
+ #include <memory>
++#include <string>
+ #include <string_view>
+ #include <utility>
+ 
+@@ -109,10 +110,26 @@ bool DrmWrapper::Initialize() {
+     return false;
+   }
+ 
+-  // Set atomic capabilities. Note: we cache the outcome since there is no way
+-  // to retrieve this outcome later (i.e. it's impossible, and a common mistake,
+-  // to try and get DRM_CLIENT_CAP_ATOMIC capability.)
+-  is_atomic_ = SetCapability(DRM_CLIENT_CAP_ATOMIC, 1);
++  // nvidia-drm advertises atomic, but TEST_ONLY commits (what Ozone uses to
++  // pick a CRTC/connector pair) fail on this driver: Ash then only retries
++  // mode=Disabled<(0,0)> and never drmModeSetCrtc. Legacy KMS is what already
++  // lights HDMI-A-3 at 3440x1440 via fbdev. HardwareDisplayPlaneManagerLegacy
++  // treats TEST_ONLY as success and commits with drmModeSetCrtc.
++  bool use_atomic = true;
++  if (ScopedDrmVersionPtr version =
++          ScopedDrmVersionPtr(drmGetVersion(drm_fd_.get()))) {
++    const std::string name(version->name, version->name_len);
++    if (name == "nvidia-drm") {
++      LOG(WARNING) << "nvidia-drm: forcing legacy KMS (atomic TEST_ONLY fails)";
++      use_atomic = false;
++    }
++  }
++  if (use_atomic) {
++    // Cache the outcome; DRM_CLIENT_CAP_ATOMIC cannot be queried later.
++    is_atomic_ = SetCapability(DRM_CLIENT_CAP_ATOMIC, 1);
++  } else {
++    is_atomic_ = false;
++  }
+ 
+   // Expose all planes (overlay, primary, and cursor) to userspace.
+   SetCapability(DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
+diff --git a/ui/ozone/platform/drm/host/drm_display_host_manager.cc b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
+--- a/ui/ozone/platform/drm/host/drm_display_host_manager.cc
++++ b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
+@@ -214,7 +214,7 @@ bool ConnectorIsConnected(int fd) {
+   bool connected = false;
+   for (int i = 0; i < resources->count_connectors; ++i) {
+     drmModeConnector* connector =
+-        drmModeGetConnectorCurrent(fd, resources->connectors[i]);
++        drmModeGetConnector(fd, resources->connectors[i]);
+     if (!connector) {
+       continue;
+     }

@@ -1,0 +1,14 @@
+# Chrome flags + env merged into /etc/chrome_dev.conf for session_manager.
+#
+# Do NOT set GBM_BACKEND=nvidia-drm or __EGL_VENDOR_LIBRARY_FILENAMES to NVIDIA-only.
+# Those force the NVIDIA stack while Ozone still opens amdgpu (Raphael recovery GUI)
+# and Ash never comes up — splash then VT only.
+#
+# Do NOT set __NV_PRIME_RENDER_OFFLOAD=1.
+# Do NOT add --allow-os-install. Do NOT --load-extension.
+
+__EGL_VENDOR_LIBRARY_DIRS=/usr/share/glvnd/egl_vendor.d
+__EGL_EXTERNAL_PLATFORM_CONFIG_DIRS=/usr/share/egl/egl_external_platform.d
+--gpu-sandbox-failures-fatal=0
+--disable-gpu-sandbox
+--ignore-gpu-blocklist

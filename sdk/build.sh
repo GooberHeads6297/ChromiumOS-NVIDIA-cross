@@ -255,22 +255,20 @@ stage_link() {
         fi
     fi
 
-    # minigbm is a cros workon package, so its patch is applied to the checked-out
-    # source tree rather than dropped into an ebuild files/ directory.
-    local mg_src="${CROS_CHECKOUT}/src/platform/minigbm"
+    # minigbm's nvidia-drm backend is owned by the overlay ebuild
+    # media-libs/minigbm-0.0.1-r810, not by a git-apply here: a non-cros_workon
+    # emerge builds CROS_WORKON_TREE and silently ignores a dirty
+    # src/platform/minigbm, which is how stock minigbm reached a flashed image.
     local mg_patch="${REPO_ROOT}/patches/minigbm/0001-add-nvidia-drm-dumb-backend.patch"
-    if [ "$BOARD" != "amd64-generic" ] && [ -d "$mg_src" ] && [ -f "$mg_patch" ]; then
-        if git -C "$mg_src" apply --check "$mg_patch" 2>/dev/null; then
-            log "applying minigbm nvidia-drm backend patch"
-            git -C "$mg_src" apply "$mg_patch"
-        elif git -C "$mg_src" apply --reverse --check "$mg_patch" 2>/dev/null; then
-            log "minigbm patch already applied"
+    local mg_ebuild_patch="${REPO_ROOT}/overlay/overlay-nvidia-generic/media-libs/minigbm/files/0001-add-nvidia-drm-dumb-backend.patch"
+    if [ "$BOARD" != "amd64-generic" ]; then
+        if [ ! -f "$mg_ebuild_patch" ]; then
+            warn "overlay minigbm patch missing: ${mg_ebuild_patch}"
+        elif ! cmp -s "$mg_patch" "$mg_ebuild_patch"; then
+            warn "patches/minigbm/ and the overlay copy differ; the ebuild one is what builds."
         else
-            warn "minigbm patch does not apply cleanly against ${mg_src}."
-            warn "Upstream has probably moved. Rebase patches/minigbm/ before continuing."
+            log "minigbm nvidia-drm backend ships via media-libs/minigbm-0.0.1-r810"
         fi
-    elif [ "$BOARD" != "amd64-generic" ]; then
-        warn "minigbm source not found at ${mg_src}; skipping patch (run repo sync?)"
     fi
 
     # login_manager: de-Google first boot + always honour chrome_dev.conf.
@@ -290,6 +288,40 @@ stage_link() {
         fi
     elif [ "$BOARD" != "amd64-generic" ]; then
         warn "platform2/login_manager not found; skipping local-account patch"
+    fi
+
+    # chromeos-chrome: prefer a *connected* nvidia-drm card over amdgpu CRTCs.
+    # Requires emerge chromeos-base/chromeos-chrome (tools/rebuild-display-image.sh).
+    local ch_src=""
+    local cand
+    for cand in "${CROS_CHECKOUT}/chrome_root/src" \
+                "${CROS_CHECKOUT}/src/aosp/external/chromium/src"; do
+        if [ -f "${cand}/ui/ozone/platform/drm/common/drm_util.cc" ]; then
+            ch_src="$cand"
+            break
+        fi
+    done
+    if [ "$BOARD" != "amd64-generic" ] && [ -n "$ch_src" ]; then
+        local ch_patch
+        for ch_patch in "${REPO_ROOT}/patches/chrome/"*.patch; do
+            [ -f "$ch_patch" ] || continue
+            if patch -d "$ch_src" -p1 --dry-run --reverse --batch < "$ch_patch" >/dev/null 2>&1; then
+                log "$(basename "$ch_patch") already applied"
+            elif patch -d "$ch_src" -p1 --dry-run --forward --batch < "$ch_patch" >/dev/null 2>&1; then
+                log "applying $(basename "$ch_patch")"
+                patch -d "$ch_src" -p1 --forward --batch < "$ch_patch"
+            elif grep -q 'forcing legacy KMS\|PickDisplayCard' \
+                    "${ch_src}/ui/ozone/platform/drm/common/drm_wrapper.cc" \
+                    "${ch_src}/ui/ozone/platform/drm/host/drm_display_host_manager.cc" \
+                    2>/dev/null; then
+                log "$(basename "$ch_patch") already in tree (fuzz)"
+            else
+                warn "$(basename "$ch_patch") does not apply against ${ch_src}"
+                warn "Rebase patches/chrome/ and retry."
+            fi
+        done
+    elif [ "$BOARD" != "amd64-generic" ]; then
+        warn "chrome ozone drm_util.cc not found; skipping nvidia-drm patches"
     fi
 }
 

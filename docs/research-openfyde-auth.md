@@ -64,3 +64,6 @@ Host-side capture: [`docs/auth-debug-capture.md`](auth-debug-capture.md).
 | Auth package | `chromeos-base/nvidia-generic-auth` (via `virtual/chromeos-bsp`) |
 | SSH create helper | `/usr/sbin/create-local-account.sh` |
 | Diagnosis / gate | `tools/collect-auth-debug.sh`, `tools/verify-local-account.sh` |
+
+
+for c in /sys/class/drm/card[0-9]; do echo "== $(basename "$c") =="; basename "$(readlink -f "$c/device/driver" 2>/dev/null)" 2>/dev/null || echo no-driver; done; echo simple-framebuffer.0 > /sys/bus/platform/drivers/simple-framebuffer/unbind 2>/dev/null || true; rmmod simpledrm 2>/dev/null || true; echo Y > /sys/module/nvidia_drm/parameters/fbdev 2>/dev/null || true; sed -i 's/fbdev=0/fbdev=1/g' /etc/modprobe.d/zz-nvidia-generic-modeset.conf /etc/modprobe.d/nvidia-modeset.conf 2>/dev/null || true; grep -qF -- '--disable-gpu-sandbox' /etc/chrome_dev.conf || echo '--disable-gpu-sandbox' >> /etc/chrome_dev.conf; restart ui; sleep 3; echo "fbdev=$(cat /sys/module/nvidia_drm/parameters/fbdev 2>/dev/null)"; grep -iE 'Permission denied|Failed to authenticate|Unable to initialize GBM|Couldn.t create Gbm' /var/log/chrome/chrome | tail -40

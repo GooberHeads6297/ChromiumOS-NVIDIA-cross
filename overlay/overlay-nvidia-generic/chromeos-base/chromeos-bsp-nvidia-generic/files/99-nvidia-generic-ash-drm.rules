@@ -1,0 +1,9 @@
+# DISABLED — do not install.
+#
+# Denying chronos the Raphael amdgpu card* node was meant to force Ash onto
+# nvidia-drm. In practice Ozone then had no working DRM master: splash on the
+# RTX, VT2 on both monitors, no login UI. Keep amdgpu card* at 0660 video so
+# the iGPU GUI works until chromeos-chrome with GetPreferredDrmDrivers
+# nvidia-drm is proven on this hardware.
+
+# SUBSYSTEM=="drm", KERNEL=="card[0-9]*", ATTRS{vendor}=="0x1002", ATTRS{device}=="0x164e", OWNER="root", GROUP="root", MODE="0600"

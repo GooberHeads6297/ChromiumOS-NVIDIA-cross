@@ -76,14 +76,19 @@ data["LastActiveUser"] = email
 as_dict("UserDisplayEmail")[email] = email
 as_dict("UserDisplayName")[email] = name
 as_dict("UserGivenName")[email] = name
-# user_manager::UserType::USER_TYPE_REGULAR == 0
+# user_manager::UserType::kRegular == 0
 as_dict("UserType")[email] = 0
 as_dict("UserForceOnlineSignin")[email] = False
+# Regular users are treated as HasGaiaAccount(). UNKNOWN/INVALID OAuth status
+# forces ONLINE_SIGN_IN (Google verification) instead of the password field.
+# OAUTH2_TOKEN_STATUS_VALID == 4 → offline password AuthFactor (local-password).
+as_dict("OAuthTokenStatus")[email] = 4
 
 path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 os.chown(path, 1000, 1000)  # chronos uid/gid on ChromeOS images
 os.chmod(path, 0o600)
-print("[local-login] wrote", path, "users=", data["LoggedInUsers"])
+print("[local-login] wrote", path, "users=", data["LoggedInUsers"],
+      "oauth=", data.get("OAuthTokenStatus", {}).get(email))
 PY
 
 # chronos is not always uid 1000; prefer chown by name

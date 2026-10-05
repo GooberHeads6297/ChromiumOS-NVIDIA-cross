@@ -1,0 +1,10 @@
+# /lib/udev/rules.d/99-nvidia-generic-drm-acl.rules
+#
+# ChromeOS defaults often leave /dev/dri/card* as root:root 0600. Ash (chronos)
+# must open a card node to become DRM master; otherwise chrome logs
+# "Failed to open /dev/dri/cardN: Permission denied (13)" and there is no GUI.
+#
+# Must live under /lib/udev/rules.d (Portage QA rejects /etc/udev/rules.d).
+
+ACTION=="add|change", SUBSYSTEM=="drm", KERNEL=="card[0-9]*", OWNER="root", GROUP="video", MODE="0660"
+ACTION=="add|change", SUBSYSTEM=="drm", KERNEL=="renderD[0-9]*", OWNER="root", GROUP="video", MODE="0660"

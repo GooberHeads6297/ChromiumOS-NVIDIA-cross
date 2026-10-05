@@ -1,0 +1,16 @@
+# /lib/udev/rules.d/99-nvidia-generic-drm-force.rules
+#
+# Bring-up only. Sorts after 99-nvidia-generic-drm-acl.rules and widens every
+# DRM and NVIDIA node to 0666 so no Unix mode can be blamed for Chrome's
+# "Unable to initialize GBM ... Permission denied (13)".
+#
+# This is a dev/test image with a writable rootfs; delete this one file to go
+# back to 0660 root:video.
+
+ACTION=="add|change", SUBSYSTEM=="drm", KERNEL=="card[0-9]*", MODE="0666"
+ACTION=="add|change", SUBSYSTEM=="drm", KERNEL=="renderD[0-9]*", MODE="0666"
+KERNEL=="nvidiactl", MODE="0666"
+KERNEL=="nvidia[0-9]*", MODE="0666"
+KERNEL=="nvidia-modeset", MODE="0666"
+KERNEL=="nvidia-uvm", MODE="0666"
+KERNEL=="nvidia-uvm-tools", MODE="0666"

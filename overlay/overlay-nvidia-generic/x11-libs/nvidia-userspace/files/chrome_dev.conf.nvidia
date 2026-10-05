@@ -27,10 +27,8 @@
 --disable-gpu-driver-bug-workarounds
 
 # ---------------------------------------------------------------------------
-# Use the native NVIDIA GL/EGL stack rather than SwiftShader.
-# ---------------------------------------------------------------------------
---use-gl=egl
---use-angle=gl-egl
+# --use-gl=egl / --use-angle=gl-egl are a poor fit for Ash GBM (native EGL).
+# Applied flags live in chrome_dev.conf.display (nvidia-generic-auth).
 
 # ---------------------------------------------------------------------------
 # Vulkan. Optional for the UI, but turning it on here is the cheapest end-to-end check

@@ -95,7 +95,7 @@ if [ -n "$SID" ] && [ -n "$PASSWORD" ]; then
     hdr "5. authenticate + prepare vault"
     if cryptohome --action=authenticate_auth_factor \
             --auth_session_id="$SID" \
-            --key_label=password \
+            --key_label=local-password \
             --password="$PASSWORD" >/tmp/auth.out 2>&1; then
         ok "authenticate_auth_factor succeeded"
     else

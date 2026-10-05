@@ -18,12 +18,17 @@ Read [SAFETY.md](SAFETY.md) first. Ubuntu on `sda` is never a flash or install t
 
 From this repo on Ubuntu, **not** as root. `cros_sdk` must run as your user.
 
-### 1. Rebuild image (auth package + login_manager + test image)
+### 1. Rebuild image (auth + BSP DRM ACL + login_manager + test image)
 
 ```bash
 cd "/home/gooberheads/CodeEnv/NVIDIA cross ChromeOS"
 ./tools/rebuild-auth-image.sh --flash /dev/sdc
 ```
+
+That also ships `/dev/dri/card*` as `0660 video`, `nvidia-drm modeset=1 fbdev=1`,
+`simpledrm` blacklisted, `--disable-gpu-sandbox`, and an Upstart job that unbinds
+fbcon DRM master before `ui` so Ash/minigbm can CREATE_DUMB. Does **not** rebuild
+chromeos-chrome.
 
 Omit `--flash` to build only. Then:
 
@@ -59,64 +64,65 @@ ls -l /usr/sbin/create-local-account.sh /usr/sbin/register-local-login.sh
 If those scripts are missing, this stick was flashed before `nvidia-generic-auth`. Rebuild
 and reflash; do not expect Ubuntu `scp` (this machine often has no SSH into ChromiumOS).
 
-### 3. Install to NVMe (from ChromiumOS, never Ubuntu)
+### 3. Install to NVMe
 
-`install-to-disk.sh` must run **on the live ChromiumOS USB**, as root. It wipes the
-destination disk. Dry-run first. Confirm the NVMe node (`nvme0n1` vs `nvme1n1`) on **this**
-boot.
+On the **live USB**, Guest (or a browser) → **http://127.0.0.1:17891/** — pick the
+internal disk, dry-run, type `erase DISKNAME`. Same checks as `install-to-disk.sh`
+(Ubuntu UUID refuse). Shell still works:
 
 ```bash
 install-to-disk.sh --dst /dev/nvme0n1 --dry-run
 install-to-disk.sh --dst /dev/nvme0n1
 ```
 
-USB cryptohome vaults **do not** copy to NVMe. After reboot from NVMe, create the local
-user **again**.
+USB vaults **do not** copy to NVMe. After NVMe boot, open `:17891` again (not Guest)
+and set `localuser@localhost`’s password.
+
+Ash on the RTX (not only iGPU/fbcon) needs the minigbm `nvidia-drm` backend:
+
+```bash
+./tools/rebuild-display-image.sh --minigbm-only
+```
+
+Chrome's `Unable to initialize GBM ... Permission denied (13)` is a **stale errno**:
+`gbm_create_device()` returns NULL because minigbm has no backend matching the
+`nvidia-drm` driver name, and nothing is denying access. The backend ships in
+`media-libs/minigbm-0.0.1-r810` (overlay) — a git-apply into `src/platform/minigbm`
+does not reach the image, because a non-`cros_workon` emerge builds
+`CROS_WORKON_TREE`. Verify on the device with `nvidia-gbm-probe` and:
+
+```bash
+grep -aF nvidia-drm /usr/lib64/libminigbm.so.1.0.0
+```
+
+Pass `--with-chrome` to also rebuild Ozone's prefer-nvidia-drm patch (hours). Keep a
+motherboard monitor for recovery.
 
 ---
 
-## Account setup (CLI) — do this on the device
+## Account setup — device
 
-Stay on the login screen or VT2 as **root**. **Sign out of Guest** first (Guest makes
-`PreparePersistentVault` fail with `CRYPTOHOME_ERROR_MOUNT_FATAL`).
+**GUI:** http://127.0.0.1:17891/ (URL also printed on VT2).
 
-**Do not** use Chrome **Create local account** → **Next**. That Gaia fallback crashes
-login Chrome and can powerwash when API keys are absent.
+**CLI:** stay on login / VT2 as **root**. **Sign out of Guest** first.
+
+**Do not** use Chrome **Create local account** → **Next**.
 
 ```bash
 ensure-software-tpm.sh
 cryptohome --action=unmount
-
-# First time, or after a failed half-create:
-create-local-account.sh --force-remove --user localuser@localhost --password 'testpass' --key-label gaia
-
-# If the vault already exists and you only need the login pod:
+create-local-account.sh --force-remove --user localuser@localhost --password 'testpass'
 register-local-login.sh --user localuser@localhost
 ```
 
-`create-local-account.sh` already calls `register-local-login.sh` when that file is in
-`/usr/sbin`. Flag form is required: `--user EMAIL`, not a bare email.
+Default AuthFactor label is **`local-password`**. Flag form `--user EMAIL` is required.
 
-Then Ctrl-Alt-F1. Sign in on the **localuser** pod with the same password. If you still
-get Google **Verify it's you**, the image’s `session_manager` is not applying
-`--disable-gaia-services` — rebuild with `rebuild-auth-image.sh` (it emerges
-`chromeos-login` with `patches/login_manager/nvidia-generic-local-accounts.patch`). A
-live workaround on a test image:
-
-```bash
-mount -o remount,rw /
-printf '%s\n' '#!/bin/sh' 'exit 0' > /usr/sbin/is_developer_end_user
-chmod 0755 /usr/sbin/is_developer_end_user
-printf '%s\n' '--oobe-skip-to-login' '--allow-failed-policy-fetch-for-test' '--disable-gaia-services' '--skip-force-online-signin-for-testing' >> /etc/chrome_dev.conf
-restart ui
-```
-
-If the password field rejects `testpass` but you created with label `password`, recreate
-with `--key-label gaia` (Chrome’s login screen looks up that factor). Optional check:
+Then Ctrl-Alt-F1, sign in on the **localuser** pod. Optional:
 
 ```bash
 verify-local-account.sh --user localuser@localhost --password 'testpass'
 verify-crostini-host.sh
+verify-stage3.sh
 ```
 
 Guest sessions gray out **Settings → Linux**; a persistent local user should not.
@@ -160,7 +166,9 @@ Host copies of the same scripts live under `tools/`. Deep notes:
 | `sdk/bootstrap.sh` / `sdk/build.sh` | Host prep and image build |
 | `overlay/overlay-nvidia-generic/` | Board overlay (drivers, BSP, auth) |
 | `patches/login_manager/` | Skip Gaia; always apply `chrome_dev.conf` |
+| `patches/chrome/` | Ozone prefers nvidia-drm |
 | `tools/rebuild-auth-image.sh` | Fast rebuild for auth + login_manager |
+| `tools/rebuild-display-image.sh` | minigbm nvidia-drm backend; optional chromeos-chrome |
 | `tools/flash.sh` | USB writer with disk allowlist |
 | `tools/install-to-disk.sh` | Device-side NVMe install |
 | [docs/INSTALL.md](docs/INSTALL.md) | Full phased runbook |

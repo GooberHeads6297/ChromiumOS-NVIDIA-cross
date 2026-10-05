@@ -371,9 +371,10 @@ From `SAFETY.md` and `safety/limits.conf`. The user has one RTX 4070 Ti SUPER.
 ## 7. Local accounts / cryptohome (openFyde-informed)
 
 See [`docs/LOCAL-ACCOUNTS.md`](LOCAL-ACCOUNTS.md). USB vaults do **not** carry to NVMe —
-create the account after `install-to-disk.sh`. Package `nvidia-generic-auth` ships
-`/usr/sbin/create-local-account.sh`, HTTP UI on `:17891`, and a Chrome extension; login_manager
-is patched (via `patches/login_manager/`) to skip Gaia and load the extension.
+create the account after install (`http://127.0.0.1:17891/` or CLI). Package
+`nvidia-generic-auth` ships `/usr/sbin/create-local-account.sh` (factor `local-password`)
+and the HTTP installer. login_manager is patched to skip Gaia and always apply
+`chrome_dev.conf`. Do **not** `--load-extension` at login.
 
 ## 8. Still genuinely unsolved (do not start here)
 

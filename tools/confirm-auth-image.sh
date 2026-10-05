@@ -70,6 +70,45 @@ check_path /usr/share/chromiumos-nvidia-cross/local-account-setup.py
 check_path /usr/share/chromiumos-nvidia-cross/local-account-ext/manifest.json
 check_path /etc/init/local-account-setup.conf
 check_path /usr/share/chromiumos-nvidia-cross/chrome_dev.conf.auth
+check_path /usr/share/chromiumos-nvidia-cross/chrome_dev.conf.display
+check_path /lib/udev/rules.d/99-nvidia-generic-drm-acl.rules
+check_path /usr/lib/tmpfiles.d/nvidia-generic-drm-acl.conf
+check_path /etc/modprobe.d/zz-nvidia-generic-modeset.conf
+check_path /etc/modprobe.d/zz-nvidia-generic-blacklist-simpledrm.conf
+check_path /etc/init/release-nvidia-drm-master.conf
+check_path /usr/share/chromiumos-nvidia-cross/release-nvidia-drm-master.sh
+check_path /lib/udev/rules.d/99-nvidia-generic-drm-force.rules
+check_path /usr/lib/tmpfiles.d/zz-nvidia-generic-drm-force.conf
+check_path /usr/sbin/nvidia-gbm-probe
+if debugfs -R "cat /usr/share/chromiumos-nvidia-cross/chrome_dev.conf.display" \
+     "$ROOT_IMG" 2>/dev/null | grep -qF -- '--disable-gpu-sandbox'; then
+  printf '  [ OK ]  chrome_dev.conf.display has --disable-gpu-sandbox\n'
+else
+  printf '  [FAIL]  chrome_dev.conf.display missing --disable-gpu-sandbox\n'
+  FAIL=$(( FAIL + 1 ))
+fi
+# "nvidia" matches the board path baked into every .so; require "nvidia-drm".
+# The real file is libminigbm.so.1.0.0 -- libgbm.so* are symlinks to it.
+MG_SO="${WORK}/libminigbm.so"
+MG_FOUND=0
+for mg_path in /usr/lib64/libminigbm.so.1.0.0 /usr/lib/libminigbm.so.1.0.0; do
+  if debugfs -R "dump ${mg_path} ${MG_SO}" "$ROOT_IMG" >/dev/null 2>&1 \
+     && [ -s "$MG_SO" ]; then
+    MG_FOUND=1
+    break
+  fi
+done
+if [ "$MG_FOUND" -eq 1 ]; then
+  if grep -aF 'nvidia-drm' "$MG_SO" >/dev/null; then
+    printf '  [ OK ]  libminigbm contains nvidia-drm backend\n'
+  else
+    printf '  [FAIL]  libminigbm missing nvidia-drm (stock r809, not overlay r810)\n'
+    FAIL=$(( FAIL + 1 ))
+  fi
+else
+  printf '  [FAIL]  could not dump libminigbm.so.1.0.0 from ROOT-A\n'
+  FAIL=$(( FAIL + 1 ))
+fi
 
 if [ "$FAIL" -eq 0 ]; then
     banner "PASS — nvidia-generic-auth is in the image"

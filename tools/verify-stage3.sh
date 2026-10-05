@@ -36,8 +36,8 @@ case "$ms" in
 esac
 
 fb="$(cat /sys/module/nvidia_drm/parameters/fbdev 2>/dev/null || echo '?')"
-[ "$fb" = "Y" ] || [ "$fb" = "1" ] && ok "nvidia_drm fbdev=${fb}" \
-                                   || note "nvidia_drm fbdev=${fb}; no framebuffer console on the RTX"
+[ "$fb" = "Y" ] || [ "$fb" = "1" ] && ok "nvidia_drm fbdev=${fb} (splash/fbcon on RTX)" \
+                                   || note "nvidia_drm fbdev=${fb}; expected Y for splash bring-up"
 
 # ---------------------------------------------------------------------------
 hdr "2. DRM devices"
@@ -73,17 +73,18 @@ fi
 hdr "3. minigbm has an nvidia-drm backend"
 # ---------------------------------------------------------------------------
 # The patched minigbm registers a backend named "nvidia-drm". Without it, Chrome cannot
-# allocate buffers on this device.
-mg="$(find /usr/lib64 /usr/lib -maxdepth 1 -name 'libgbm.so*' -print -quit 2>/dev/null)"
+# allocate buffers on this device. Do not grep "nvidia" — that hits board path
+# nvidia-generic inside the .so.
+mg="$(find /usr/lib64 /usr/lib -maxdepth 1 \( -name 'libminigbm.so*' -o -name 'libgbm.so*' \) -print -quit 2>/dev/null)"
 if [ -n "$mg" ]; then
-    if strings "$mg" 2>/dev/null | grep -qx 'nvidia-drm'; then
+    if grep -aF 'nvidia-drm' "$mg" >/dev/null; then
         ok "minigbm contains the nvidia-drm backend ($(basename "$mg"))"
     else
         bad "minigbm has no nvidia-drm backend string.
-          The patch in patches/minigbm/ is not in this image."
+          Stock r809 was emerged; need overlay media-libs/minigbm-0.0.1-r810."
     fi
 else
-    note "could not locate libgbm to inspect"
+    note "could not locate libminigbm/libgbm to inspect"
 fi
 
 # ---------------------------------------------------------------------------
@@ -131,6 +132,61 @@ if command -v nvidia-smi >/dev/null 2>&1; then
     else
         note "GPU utilisation and memory are both ~0; nothing is rendering on it yet"
     fi
+fi
+
+# ---------------------------------------------------------------------------
+hdr "5b. Chrome DRM master (Ash must own nvidia-drm, not only amdgpu)"
+# ---------------------------------------------------------------------------
+chrome_nvidia_card=0
+chrome_amdgpu_card=0
+for pid in $(pidof chrome 2>/dev/null || true); do
+    [ -d "/proc/${pid}/fd" ] || continue
+    for fd in /proc/${pid}/fd/*; do
+        tgt="$(readlink -f "$fd" 2>/dev/null || true)"
+        case "$tgt" in
+            /dev/dri/card[0-9]*)
+                cn="$(basename "$tgt")"
+                drv="$(basename "$(readlink -f "/sys/class/drm/${cn}/device/driver" 2>/dev/null)" 2>/dev/null || echo '?')"
+                printf '          chrome pid %s -> %s (%s)\n' "$pid" "$tgt" "$drv"
+                [ "$drv" = "nvidia" ] && chrome_nvidia_card=1
+                [ "$drv" = "amdgpu" ] && chrome_amdgpu_card=1
+                ;;
+        esac
+    done
+done
+if [ "$chrome_nvidia_card" -eq 1 ]; then
+    ok "Chrome has an nvidia DRM card node open (Ash on the RTX)"
+elif [ "$chrome_amdgpu_card" -eq 1 ]; then
+    bad "Chrome only has amdgpu card* open. UI is on the iGPU; nvidia-drm is fbcon.
+          Rebuild with tools/rebuild-display-image.sh after Ozone nvidia-drm
+          preference is proven. Do not hide amdgpu card* from chronos — that
+          drops the iGPU login UI with no NVIDIA replacement."
+else
+    note "could not map Chrome fds to /dev/dri/card* (run as root, ui running)"
+fi
+
+if [ -r /etc/init/release-nvidia-drm-master.conf ] \
+   && [ -x /usr/share/chromiumos-nvidia-cross/release-nvidia-drm-master.sh ]; then
+    ok "fbcon DRM-master release job is installed (runs before ui)"
+else
+    note "missing release-nvidia-drm-master; fbcon may hold nvidia-drm master (EACCES on GBM)"
+fi
+
+if [ -r /etc/chrome_dev.conf ]; then
+    grep -q 'disable-gaia-services' /etc/chrome_dev.conf \
+        && ok "chrome_dev.conf has --disable-gaia-services" \
+        || note "chrome_dev.conf missing --disable-gaia-services"
+    grep -q 'gpu-sandbox-failures-fatal=0' /etc/chrome_dev.conf \
+        && ok "chrome_dev.conf has --gpu-sandbox-failures-fatal=0" \
+        || note "chrome_dev.conf missing gpu-sandbox-failures-fatal=0"
+    grep -q 'GBM_BACKEND=nvidia-drm' /etc/chrome_dev.conf \
+        && bad "chrome_dev.conf forces GBM_BACKEND=nvidia-drm (breaks iGPU Ash)" \
+        || ok "chrome_dev.conf does not force GBM_BACKEND=nvidia-drm"
+    grep -q '__NV_PRIME_RENDER_OFFLOAD=1' /etc/chrome_dev.conf \
+        && bad "chrome_dev.conf still sets PRIME offload (scanout stays on iGPU)" \
+        || ok "no __NV_PRIME_RENDER_OFFLOAD=1 in chrome_dev.conf"
+else
+    note "no /etc/chrome_dev.conf"
 fi
 
 # ---------------------------------------------------------------------------

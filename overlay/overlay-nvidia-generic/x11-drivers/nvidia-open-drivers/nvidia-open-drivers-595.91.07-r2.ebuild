@@ -108,9 +108,7 @@ src_install() {
 	insinto /etc/modprobe.d
 	doins "${FILESDIR}/nvidia.conf"
 
-	# Dual-output default: modeset=1 fbdev=1 on the RTX while amdgpu keeps the
-	# motherboard console. Installed as nvidia-modeset.conf (not the old
-	# nvidia-modeset-off.conf name from before the revision bump).
+	# RTX KMS, no NVIDIA fbcon (fbdev=0) so Ash can drmSetMaster.
 	newins "${FILESDIR}/nvidia-modeset.conf" nvidia-modeset.conf
 
 	# Device nodes. ChromeOS has no nvidia-modprobe running as root at login, so the
@@ -123,8 +121,8 @@ pkg_postinst() {
 	elog "NVIDIA open kernel modules ${PV} installed."
 	elog ""
 	elog "Modesetting is ENABLED (/etc/modprobe.d/nvidia-modeset.conf):"
-	elog "    options nvidia-drm modeset=1 fbdev=1"
-	elog "Keep a monitor on the motherboard (amdgpu recovery console) and one on the RTX."
+	elog "    options nvidia-drm modeset=1 fbdev=0"
+	elog "Plug the GUI monitor into the RTX. iGPU/amdgpu stays loaded for recovery."
 	elog ""
 	elog "Driver + iGPU gate:"
 	elog "    lspci -k | grep -A3 10de:2705    # driver in use should be 'nvidia'"

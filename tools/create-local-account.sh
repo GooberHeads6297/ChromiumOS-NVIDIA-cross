@@ -14,7 +14,7 @@ set -euo pipefail
 
 USER_EMAIL=""
 PASSWORD=""
-KEY_LABEL="password"
+KEY_LABEL="local-password"
 KEEP_MOUNTED=0
 FORCE_REMOVE=0
 

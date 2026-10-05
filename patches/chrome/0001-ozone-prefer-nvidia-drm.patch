@@ -1,0 +1,144 @@
+diff --git a/ui/ozone/platform/drm/common/drm_util.cc b/ui/ozone/platform/drm/common/drm_util.cc
+index ff41454120cb8..25620962ec3aa 100644
+--- a/ui/ozone/platform/drm/common/drm_util.cc
++++ b/ui/ozone/platform/drm/common/drm_util.cc
+@@ -1268,8 +1268,9 @@ std::vector<const char*> GetPreferredDrmDrivers() {
+     return {"radeon"};
+   }
+ 
+-  // Default order.
+-  return {"i915", "amdgpu", "virtio_gpu"};
++  // nvidia-generic: discrete NVIDIA must win over the iGPU recovery console.
++  // Upstream prefers i915/amdgpu, which pins Ash to Raphael on this board.
++  return {"nvidia-drm", "nvidia", "i915", "amdgpu", "virtio_gpu"};
+ }
+ 
+ void ConsolidateTiledDisplayInfo(
+diff --git a/ui/ozone/platform/drm/host/drm_display_host_manager.cc b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
+index 27eea5ab9d47c..5b02fde88f1e4 100644
+--- a/ui/ozone/platform/drm/host/drm_display_host_manager.cc
++++ b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
+@@ -7,6 +7,7 @@
+ #include <fcntl.h>
+ #include <stddef.h>
+ #include <xf86drm.h>
++#include <xf86drmMode.h>
+ 
+ #include <array>
+ #include <memory>
+@@ -202,8 +203,33 @@ void OpenDeviceAsync(const base::FilePath& device_path,
+ struct DisplayCard {
+   base::FilePath path;
+   std::optional<std::string> driver;
++  bool connected = false;
+ };
+ 
++bool ConnectorIsConnected(int fd) {
++  drmModeRes* resources = drmModeGetResources(fd);
++  if (!resources) {
++    return false;
++  }
++  bool connected = false;
++  for (int i = 0; i < resources->count_connectors; ++i) {
++    drmModeConnector* connector =
++        drmModeGetConnectorCurrent(fd, resources->connectors[i]);
++    if (!connector) {
++      continue;
++    }
++    if (connector->connection == DRM_MODE_CONNECTED) {
++      connected = true;
++    }
++    drmModeFreeConnector(connector);
++    if (connected) {
++      break;
++    }
++  }
++  drmModeFreeResources(resources);
++  return connected;
++}
++
+ std::vector<DisplayCard> GetValidDisplayCards() {
+   std::vector<DisplayCard> cards;
+ 
+@@ -231,14 +257,36 @@ std::vector<DisplayCard> GetValidDisplayCards() {
+     VPLOG_IF(1, ret) << "Failed to get DRM resources for '" << card_path << "'";
+ 
+     if (ret == 0 && res.count_crtcs > 0) {
+-      cards.push_back(
+-          {base::FilePath(card_path), GetDrmDriverNameFromFd(fd.get())});
++      cards.push_back({base::FilePath(card_path), GetDrmDriverNameFromFd(fd.get()),
++                       ConnectorIsConnected(fd.get())});
+     }
+   }
+ 
+   return cards;
+ }
+ 
++base::FilePath PickDisplayCard(const std::vector<DisplayCard>& cards,
++                               bool require_connected) {
++  const auto preferred_drivers = GetPreferredDrmDrivers();
++  for (const auto* preferred_driver : preferred_drivers) {
++    for (const auto& card : cards) {
++      if (require_connected && !card.connected) {
++        continue;
++      }
++      if (card.driver == preferred_driver) {
++        return card.path;
++      }
++    }
++  }
++  for (const auto& card : cards) {
++    if (require_connected && !card.connected) {
++      continue;
++    }
++    return card.path;
++  }
++  return base::FilePath();
++}
++
+ base::FilePath GetPrimaryDisplayCardPath() {
+   // The kernel might not have the DRM driver ready yet. This can happen when
+   // the DRM driver binding has been deferred, waiting on dependencies to be
+@@ -247,18 +295,16 @@ base::FilePath GetPrimaryDisplayCardPath() {
+   for (int i = 0; i < 10; ++i) {
+     std::vector<DisplayCard> cards = GetValidDisplayCards();
+ 
+-    // Find the card with the most preferred driver.
+-    const auto preferred_drivers = GetPreferredDrmDrivers();
+-    for (const auto* preferred_driver : preferred_drivers) {
+-      for (const auto& card : cards) {
+-        if (card.driver == preferred_driver)
+-          return card.path;
+-      }
++    // Prefer a GPU that actually has a monitor. Otherwise amdgpu wins on this
++    // board (Raphael always has CRTCs) and Ash never scanouts on nvidia-drm.
++    base::FilePath path = PickDisplayCard(cards, /*require_connected=*/true);
++    if (!path.empty()) {
++      return path;
++    }
++    path = PickDisplayCard(cards, /*require_connected=*/false);
++    if (!path.empty()) {
++      return path;
+     }
+-
+-    // Fall back to the first usable card.
+-    if (!cards.empty())
+-      return cards[0].path;
+ 
+     // If no card is ready, sleep and try again.
+     usleep(kDriverReadySleepMs * 1000);
+diff --git a/ui/ozone/platform/wayland/common/drm_render_node_path_finder.cc b/ui/ozone/platform/wayland/common/drm_render_node_path_finder.cc
+index e0191188978a4..58f637de27944 100644
+--- a/ui/ozone/platform/wayland/common/drm_render_node_path_finder.cc
++++ b/ui/ozone/platform/wayland/common/drm_render_node_path_finder.cc
+@@ -165,8 +165,8 @@ base::FilePath DrmRenderNodePathFinder::SelectRenderNodeFromCandidates(
+     return base::FilePath();
+   }
+ 
+-  static constexpr std::string_view kPreferredDrivers[] = {"i915", "amdgpu",
+-                                                           "virtio_gpu"};
++  static constexpr std::string_view kPreferredDrivers[] = {
++      "nvidia-drm", "nvidia", "i915", "amdgpu", "virtio_gpu"};
+   for (std::string_view preferred_driver : kPreferredDrivers) {
+     for (const auto& candidate : candidates) {
+       if (candidate.driver_name == preferred_driver) {

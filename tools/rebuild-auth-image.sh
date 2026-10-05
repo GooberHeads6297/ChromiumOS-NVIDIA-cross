@@ -1,5 +1,9 @@
 #!/bin/bash
-# tools/rebuild-auth-image.sh -- emerge auth package + rebuild test image + flash USB.
+# tools/rebuild-auth-image.sh -- emerge auth/BSP + rebuild test image (+ optional flash).
+#
+# Bakes: DRM ACL 0660 video, nvidia-drm modeset=1 fbdev=1, blacklist simpledrm,
+# --disable-gpu-sandbox, and an Upstart job that unbinds fbcon DRM master before ui.
+# Does not rebuild chromeos-chrome or minigbm.
 #
 # Requires an interactive terminal (cros_sdk / sudo). From the repo root:
 #   ./tools/rebuild-auth-image.sh
@@ -35,6 +39,7 @@ cd "$CROS_CHECKOUT"
 # cros_sdk collapses newlines inside bash -c; keep this as one semicolon-separated line
 # (no # comments — they glue onto the previous token when newlines are stripped).
 cros_sdk -- bash -c "set -euo pipefail; emerge-${BOARD} -v chromeos-base/chromeos-bsp-nvidia-generic chromeos-base/nvidia-generic-auth virtual/chromeos-bsp; emerge-${BOARD} -v chromeos-base/chromeos-login; emerge-${BOARD} -v chromeos-base/libchromeos-use-flags || true"
+# chromeos-chrome Ozone nvidia-drm preference is tools/rebuild-display-image.sh (hours).
 
 banner "build test image"
 "${REPO_ROOT}/sdk/build.sh" --board "$BOARD" image
