@@ -219,6 +219,10 @@ ships its own, so this is where Chrome-side patching may still be needed. The sc
 specifically checks for a silent fall back to software rendering, which is the trap here:
 the UI comes up looking fine and you conclude it worked.
 
+**Default diagnosis loop:** headless [auto-debug](AUTO-DEBUG.md) (arm flag from Ubuntu →
+boot → pull logs). Current Ash-on-RTX status and open bugs (FPS / cursor / tearing):
+[STAGE3-DISPLAY.md](STAGE3-DISPLAY.md).
+
 **If Stage 3 fails, stop and fix it before Phase 4.** Installing a broken graphics stack
 to the internal disk just means debugging the same problem with a slower edit loop.
 

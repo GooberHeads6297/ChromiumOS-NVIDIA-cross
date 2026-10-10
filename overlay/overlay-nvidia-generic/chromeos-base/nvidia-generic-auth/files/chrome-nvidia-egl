@@ -1,0 +1,30 @@
+#!/bin/sh
+# Real NVIDIA .so live on stateful (/usr/local/lib64); ROOT-A is too small.
+#
+# This Chrome only allows (gl=egl-angle,angle=*). Native --use-gl=egl is rejected.
+#
+# NVIDIA-first EGL: "Platform device extensions not found" → CreateSharedImage
+# fails before AddFB. Mesa-first supplies EGL_EXT_device_*; NVIDIA GBM still
+# allocates renderable scanout buffers (minigbm dumb → FBO 0x8CD6).
+export LD_LIBRARY_PATH=/usr/local/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+export GBM_BACKENDS_PATH=/usr/local/lib64/gbm
+# Do NOT set GBM_BACKEND=nvidia-drm globally — Chrome also opens amdgpu
+# renderD128; forcing nvidia-drm there yields "Couldn't create Gbm Device".
+# Mesa picks nvidia-drm vs amdgpu per fd when GBM_BACKEND is unset.
+unset GBM_BACKEND
+export MESA_GBM_LIB=/usr/local/lib64/libgbm-mesa.so.1
+export __EGL_VENDOR_LIBRARY_DIRS=/usr/share/glvnd/egl_vendor.d
+# NVIDIA-first: Mesa cannot eglCreateImage nvidia-drm dumb dma-bufs (0x3003
+# EGL_BAD_ALLOC) so Ash SetCrtc's black empty FBs. NVIDIA EGL can import them.
+# Mesa stays second for any fallback device_* probing.
+export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/50_mesa.json
+export __EGL_EXTERNAL_PLATFORM_CONFIG_DIRS=/usr/share/egl/egl_external_platform.d
+# Prefer NVIDIA's GBM EGL external platform when present.
+export EGL_PLATFORM=device
+exec /opt/google/chrome/chrome \
+  --disable-gpu-sandbox \
+  --gpu-sandbox-failures-fatal=0 \
+  --ignore-gpu-blocklist \
+  --disable-native-gpu-memory-buffers \
+  --disable-gpu-memory-buffer-compositor-resources \
+  "$@"

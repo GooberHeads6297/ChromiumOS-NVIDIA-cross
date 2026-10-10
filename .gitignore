@@ -12,6 +12,18 @@
 # Thermal logs from safety/thermal-log.sh
 /thermal-*.csv
 
+# Pulled Stage-3 auto-debug artifacts (stay local; see docs/AUTO-DEBUG.md)
+/nvidia-debug.log
+/drm-addfb.log
+/gbm-compat.log
+/nvidia-auto-debug-upstart.log
+/chrome.log
+/chrome-capture-*.txt
+
+# Python bytecode from on-host script edits
+**/__pycache__/
+*.pyc
+
 # VBIOS backups live outside the repo by default, but guard against a stray --out.
 *.rom
 *.rom.sha256

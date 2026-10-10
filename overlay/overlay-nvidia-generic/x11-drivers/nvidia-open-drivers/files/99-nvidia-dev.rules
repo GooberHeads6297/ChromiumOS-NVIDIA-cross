@@ -12,6 +12,9 @@
 ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{device}=="0x2705", \
     RUN+="/sbin/modprobe nvidia"
 
+# nvidia-drm KMS does not create /dev/nvidia0. libEGL_nvidia needs nvidia-modprobe.
+ACTION=="add", DEVPATH=="/module/nvidia", RUN+="/usr/bin/nvidia-modprobe -c 0 -u -m"
+
 # Control and primary render nodes.
 KERNEL=="nvidia", RUN+="/bin/sh -c '/sbin/modprobe nvidia'"
 KERNEL=="nvidiactl", GROUP="video", MODE="0660"

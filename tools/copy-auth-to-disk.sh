@@ -25,11 +25,19 @@ fi
 
 for f in create-local-account.sh register-local-login.sh verify-local-account.sh \
          ensure-software-tpm.sh local-account-setup.py chrome_dev.conf.auth \
-         chrome_dev.conf.display; do
+         chrome_dev.conf.display chrome-nvidia-egl ui.override; do
     [ -f "${AUTH_FILES}/${f}" ] || { echo "missing ${AUTH_FILES}/${f}" >&2; exit 1; }
 done
 
-label_of() { lsblk -no LABEL "$1" 2>/dev/null | head -n1; }
+label_of() {
+    local l
+    l=$(lsblk -no LABEL "$1" 2>/dev/null | sed '/^$/d' | head -n1)
+    if [ -n "$l" ]; then
+        printf '%s\n' "$l"
+        return
+    fi
+    lsblk -no PARTLABEL "$1" 2>/dev/null | sed '/^$/d' | head -n1
+}
 
 MNT="$(mktemp -d /tmp/cros-auth-XXXXXX)"
 cleanup() {
@@ -73,12 +81,20 @@ merge_chrome_dev() {
         ensure_flag '--skip-force-online-signin-for-testing'
     fi
 
-    if ! grep -qF '# nvidia-generic-auth display flags v3' "$conf" 2>/dev/null; then
+    if ! grep -qF '# nvidia-generic-auth display flags v6' "$conf" 2>/dev/null; then
+        sed -i '/# nvidia-generic-auth display flags v3/,/^--ignore-gpu-blocklist$/d' "$conf" 2>/dev/null || true
+        sed -i '/# nvidia-generic-auth display flags v4/,/^--disable-features=Vulkan$/d' "$conf" 2>/dev/null || true
+        sed -i '/# nvidia-generic-auth display flags v4/,/^--ignore-gpu-blocklist$/d' "$conf" 2>/dev/null || true
+        sed -i '/# nvidia-generic-auth display flags v5/,/^--ignore-gpu-blocklist$/d' "$conf" 2>/dev/null || true
+        sed -i '/^__EGL_VENDOR_LIBRARY_DIRS=/d' "$conf" 2>/dev/null || true
+        sed -i '/^__EGL_VENDOR_LIBRARY_FILENAMES=/d' "$conf" 2>/dev/null || true
         {
-            printf '\n# nvidia-generic-auth display flags v3\n'
+            printf '\n# nvidia-generic-auth display flags v6\n'
             cat "$disp_src"
         } >> "$conf"
     fi
+    grep -qF -- '__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json' "$conf" 2>/dev/null || \
+        printf '%s\n' '__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json' >> "$conf"
     ensure_flag '--disable-gpu-sandbox'
     ensure_flag '--skip-force-online-signin-for-testing'
 
@@ -86,6 +102,17 @@ merge_chrome_dev() {
         "${MNT}/usr/share/chromiumos-nvidia-cross/chrome_dev.conf.auth"
     install -m 0644 "$disp_src" \
         "${MNT}/usr/share/chromiumos-nvidia-cross/chrome_dev.conf.display"
+    if [ -f "${AUTH_FILES}/nvidia-generic-auth-chrome.conf" ] && [ -d "${MNT}/etc/init" ]; then
+        install -m 0644 "${AUTH_FILES}/nvidia-generic-auth-chrome.conf" \
+            "${MNT}/etc/init/nvidia-generic-auth-chrome.conf"
+    fi
+    if [ -d "${MNT}/etc/init" ]; then
+        install -m 0644 "${AUTH_FILES}/ui.override" "${MNT}/etc/init/ui.override"
+    fi
+    if [ -f "${AUTH_FILES}/chrome-nvidia-egl" ]; then
+        install -m 0755 "${AUTH_FILES}/chrome-nvidia-egl" \
+            "${MNT}/usr/sbin/chrome-nvidia-egl"
+    fi
 }
 
 patch_local_state() {
@@ -136,7 +163,7 @@ copy_sbin() {
     mkdir -p "$dest" "${MNT}/usr/share/chromiumos-nvidia-cross"
     for f in create-local-account.sh register-local-login.sh verify-local-account.sh \
              ensure-software-tpm.sh collect-auth-debug.sh verify-auth-bringup.sh \
-             verify-crostini-host.sh; do
+             verify-crostini-host.sh chrome-nvidia-egl; do
         [ -f "${AUTH_FILES}/${f}" ] || continue
         install -m 0755 "${AUTH_FILES}/${f}" "${dest}/${f}"
     done
@@ -144,6 +171,11 @@ copy_sbin() {
         "${MNT}/usr/share/chromiumos-nvidia-cross/local-account-setup.py"
     # Prefer /usr/sbin helper name used by Upstart job.
     if [ -d "${MNT}/usr/sbin" ]; then
+        mkdir -p "${MNT}/usr/sbin/scripts"
+        if [ -f "${AUTH_FILES}/scripts/enable-nvidia-egl.sh" ]; then
+            install -m 0755 "${AUTH_FILES}/scripts/enable-nvidia-egl.sh" \
+                "${MNT}/usr/sbin/scripts/enable-nvidia-egl.sh"
+        fi
         install -m 0755 "${AUTH_FILES}/local-account-setup.py" \
             "${MNT}/usr/sbin/local-account-setup.py" 2>/dev/null || true
     fi
@@ -153,13 +185,18 @@ copy_sbin() {
 echo "target ${DEV}"
 ROOTS=()
 STATE=""
-for part in "${DEV}"* ; do
+shopt -s nullglob
+for part in "${DEV}"p* "${DEV}"[0-9]* "${DEV}"*; do
     [ -b "$part" ] || continue
     case "$(label_of "$part")" in
-        ROOT-A) ROOTS+=("$part") ;;
+        ROOT-A|ROOT-B) ROOTS+=("$part") ;;
         STATE|H-STATE) STATE="$part" ;;
     esac
 done
+shopt -u nullglob
+if [ "${#ROOTS[@]}" -gt 0 ]; then
+    mapfile -t ROOTS < <(printf '%s\n' "${ROOTS[@]}" | awk 'NF && !seen[$0]++')
+fi
 
 [ "${#ROOTS[@]}" -ge 1 ] || { echo "no ROOT-A partitions on ${DEV}" >&2; exit 1; }
 [ -n "$STATE" ] || { echo "no STATE/H-STATE on ${DEV}" >&2; exit 1; }
@@ -171,8 +208,10 @@ for root in "${ROOTS[@]}"; do
     copy_sbin "${MNT}/usr/sbin"
     merge_chrome_dev "${MNT}/etc/chrome_dev.conf"
     echo "  chrome_dev.conf flags:"
-    grep -E 'disable-gaia|skip-force-online|oobe-skip|disable-gpu-sandbox' \
+    grep -E 'disable-gaia|skip-force-online|oobe-skip|disable-gpu-sandbox|chrome-nvidia-egl|10_nvidia|50_mesa|VENDOR_LIBRARY_DIRS' \
         "${MNT}/etc/chrome_dev.conf" | sed 's/^/    /' || true
+    echo "  wrapper: $(ls -l "${MNT}/usr/sbin/chrome-nvidia-egl" 2>/dev/null || echo missing)"
+    echo "  ui.override: $(ls -l "${MNT}/etc/init/ui.override" 2>/dev/null || echo missing)"
     sync
     umount "$MNT"
 done

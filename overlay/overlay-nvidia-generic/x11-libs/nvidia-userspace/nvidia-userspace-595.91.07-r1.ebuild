@@ -50,12 +50,20 @@ donvlib() {
 
 src_install() {
 	# --- core driver libraries -------------------------------------------------
+	# libEGL_nvidia dlopens libnvidia-eglcore; both need glsi/gpucomp/tls.
+	# Without these, ANGLE dies with "Failed to get system egl display".
 	donvlib "libnvidia-glcore.so.${PV}"    ""
+	donvlib "libnvidia-eglcore.so.${PV}"   ""
+	donvlib "libnvidia-glsi.so.${PV}"      ""
+	donvlib "libnvidia-gpucomp.so.${PV}"   ""
+	donvlib "libnvidia-tls.so.${PV}"       ""
 	donvlib "libnvidia-allocator.so.${PV}" "libnvidia-allocator.so.1"
 
-	# --- EGL / GLX vendor libraries (dispatched via glvnd) ---------------------
+	# --- EGL / GLX / GLES vendor libraries (dispatched via glvnd) --------------
 	donvlib "libEGL_nvidia.so.${PV}" "libEGL_nvidia.so.0"
 	donvlib "libGLX_nvidia.so.${PV}" "libGLX_nvidia.so.0"
+	donvlib "libGLESv2_nvidia.so.${PV}" "libGLESv2_nvidia.so.2"
+	donvlib "libGLESv1_CM_nvidia.so.${PV}" "libGLESv1_CM_nvidia.so.1"
 
 	# --- the GBM backend, which is what makes the Chrome/Ozone path possible ---
 	# Chrome on ChromeOS allocates through minigbm and presents through GBM. NVIDIA's

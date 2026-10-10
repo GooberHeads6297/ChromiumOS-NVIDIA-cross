@@ -1,0 +1,3 @@
+# Force session_manager to exec Chrome through chrome-nvidia-egl so GLVND
+# __EGL_* variables actually reach the GPU process.
+env CHROME_COMMAND_FLAG="--chrome-command=/usr/sbin/chrome-nvidia-egl"

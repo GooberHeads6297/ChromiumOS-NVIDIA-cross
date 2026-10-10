@@ -21,3 +21,30 @@ index 321151f4c2..8f0b471bbb 100644
      builder.ApplyUserConfig(base::FilePath(kChromeDevConfigPath),
                              disallowed_prefixes);
    }
+diff --git a/login_manager/chromium_command_builder.cc b/login_manager/chromium_command_builder.cc
+index 0a8e430e7f..0fff0cd062 100644
+--- a/login_manager/chromium_command_builder.cc
++++ b/login_manager/chromium_command_builder.cc
+@@ -61,12 +61,19 @@ std::string LookUpInStringPairs(const base::StringPairs& pairs,
+   return std::string();
+ }
+ 
+-// Returns true if |name| matches /^[A-Z][_A-Z0-9]+$/.
++// Returns true if |name| matches /^_*[A-Z][_A-Z0-9]+$/.
++// Leading underscores are required for GLVND/NVIDIA vars such as
++// __EGL_VENDOR_LIBRARY_FILENAMES; the old ^[A-Z]... regex turned those
++// chrome_dev.conf lines into ignored Chrome flags.
+ bool IsEnvironmentVariableName(const std::string& name) {
+-  if (name.empty() || !(name[0] >= 'A' && name[0] <= 'Z')) {
++  size_t i = 0;
++  while (i < name.size() && name[i] == '_') {
++    ++i;
++  }
++  if (i >= name.size() || !(name[i] >= 'A' && name[i] <= 'Z')) {
+     return false;
+   }
+-  for (size_t i = 1; i < name.size(); ++i) {
++  for (; i < name.size(); ++i) {
+     char ch = name[i];
+     if (ch != '_' && !(ch >= '0' && ch <= '9') && !(ch >= 'A' && ch <= 'Z')) {
+       return false;

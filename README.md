@@ -8,9 +8,56 @@ Read [SAFETY.md](SAFETY.md) first. Ubuntu on `sda` is never a flash or install t
 
 | Detail | Where |
 | --- | --- |
+| **Auto-debug (default Stage 3 loop)** | **[docs/AUTO-DEBUG.md](docs/AUTO-DEBUG.md)** |
+| Stage 3 display status / open bugs | [docs/STAGE3-DISPLAY.md](docs/STAGE3-DISPLAY.md) |
 | Full USB → NVMe → Steam runbook | [docs/INSTALL.md](docs/INSTALL.md) |
 | Local accounts / cryptohome / Crostini | [docs/LOCAL-ACCOUNTS.md](docs/LOCAL-ACCOUNTS.md) |
-| Settled hardware and next milestone | [docs/HANDOFF.md](docs/HANDOFF.md) |
+| Settled hardware and earlier handoff | [docs/HANDOFF.md](docs/HANDOFF.md) |
+
+---
+
+## Auto-debug — how we develop Stage 3
+
+VT2 is unreliable once frecon and Ash fight over nvidia-drm master. **Arm a one-shot
+debug flag from Ubuntu, boot, power off, pull logs.** That loop is the backbone of
+this project's display work — treat it as first-class, not an afterthought.
+
+```bash
+cd "/home/gooberheads/CodeEnv/NVIDIA cross ChromeOS"
+
+# Disk idle under Ubuntu (example: internal ChromiumOS NVMe)
+sudo ./tools/arm-nvidia-auto-debug.sh /dev/nvme1n1
+# boot CrOS ~90s (pink splash on RTX HDMI = dGPU alive), power off, then:
+sudo ./tools/pull-nvidia-debug-logs.sh /dev/nvme1n1
+./tools/verify-modeset-from-logs.sh
+```
+
+When login UI is already up and you need Chrome's live ERROR/pageflip lines **without**
+stopping `ui`:
+
+```bash
+sudo ./tools/copy-sbin-scripts-to-disk.sh /dev/nvme1n1   # once, from Ubuntu
+# on device: /usr/sbin/capture-chrome-logs
+# then pull again from Ubuntu
+```
+
+Full flag table, soft-capture notes, and what `debug.sh` sections mean:
+**[docs/AUTO-DEBUG.md](docs/AUTO-DEBUG.md)**.
+
+---
+
+## Status (2026-10-10)
+
+| Stage | What it proves | State |
+| --- | --- | --- |
+| 0 | Safety harness | Done |
+| 1–2 | USB/NVMe boot, NVIDIA modules, pink RTX splash | Working |
+| Auth | Local cryptohome + login pod, no Google | In tree / on disk |
+| **3** | **Ash UI on nvidia-drm (RTX HDMI)** | **UI boots (pink → login). Still: low FPS, invisible mouse, horizontal tear bands** |
+| 4 | Steam/Proton | Blocked on Stage 3 polish |
+
+Open Stage 3 bugs and the stack we used to get past black screens:
+[docs/STAGE3-DISPLAY.md](docs/STAGE3-DISPLAY.md).
 
 ---
 
@@ -52,7 +99,8 @@ You want `/usr/sbin/create-local-account.sh` and `/usr/sbin/register-local-login
 ### 2. Boot the USB
 
 Developer mode, monitor on the **motherboard** (iGPU) for recovery. Root console is
-**Ctrl-Alt-F2** (VT2). Return to the UI with Ctrl-Alt-F1.
+**Ctrl-Alt-F2** (VT2). Return to the UI with Ctrl-Alt-F1. Prefer
+[auto-debug](docs/AUTO-DEBUG.md) when VT2 fights the GPU stack.
 
 On the device:
 
@@ -78,25 +126,23 @@ install-to-disk.sh --dst /dev/nvme0n1
 USB vaults **do not** copy to NVMe. After NVMe boot, open `:17891` again (not Guest)
 and set `localuser@localhost`’s password.
 
-Ash on the RTX (not only iGPU/fbcon) needs the minigbm `nvidia-drm` backend:
+Ash on the RTX needs Ozone patches + shims (see Stage 3 doc). Fast script/shim push
+without a full emerge:
 
 ```bash
-./tools/rebuild-display-image.sh --minigbm-only
+sudo ./tools/copy-sbin-scripts-to-disk.sh /dev/nvme1n1
 ```
 
-Chrome's `Unable to initialize GBM ... Permission denied (13)` is a **stale errno**:
-`gbm_create_device()` returns NULL because minigbm has no backend matching the
-`nvidia-drm` driver name, and nothing is denying access. The backend ships in
-`media-libs/minigbm-0.0.1-r810` (overlay) — a git-apply into `src/platform/minigbm`
-does not reach the image, because a non-`cros_workon` emerge builds
-`CROS_WORKON_TREE`. Verify on the device with `nvidia-gbm-probe` and:
+Chrome rebuild with modeset-commit patch (hours):
 
 ```bash
-grep -aF nvidia-drm /usr/lib64/libminigbm.so.1.0.0
+./tools/rebuild-chrome-0003.sh
+# or: ./tools/rebuild-display-image.sh --with-chrome
 ```
 
-Pass `--with-chrome` to also rebuild Ozone's prefer-nvidia-drm patch (hours). Keep a
-motherboard monitor for recovery.
+Pass `--with-chrome` on `rebuild-display-image.sh` for the broader display path.
+Keep a motherboard monitor for recovery. **Pink splash on RTX HDMI = nvidia-drm
+fbdev alive.**
 
 ---
 
@@ -142,33 +188,31 @@ Host copies of the same scripts live under `tools/`. Deep notes:
 
 ---
 
-## Status
-
-| Stage | What it proves | State |
-| --- | --- | --- |
-| 0 | Safety harness | Implemented |
-| 1–3 | USB boot, NVIDIA modules, dual output | Working on this hardware |
-| Auth | Local cryptohome + login pod, no Google | In tree; needs patched `chromeos-login` in the flashed image |
-| 4 | Steam/Proton | After NVMe + signed-in local user |
-
 ## Hardware (this machine)
 
 - **RTX 4070 Ti SUPER** AD103 `10de:2705`, host driver **595.91.07**
 - Ryzen 9 7900X, Raphael iGPU `amdgpu`
 - Ubuntu on `sda` (blocked). USB test stick typically `sdc`. Internal ChromiumOS is the
-  NVMe you pass to `install-to-disk.sh`.
+  NVMe you pass to `install-to-disk.sh` / auto-debug.
 
 ## Layout
 
 | Path | Purpose |
 | --- | --- |
 | [SAFETY.md](SAFETY.md) | GPU / disk guardrails |
+| [docs/AUTO-DEBUG.md](docs/AUTO-DEBUG.md) | **Headless Stage 3 capture loop** |
+| [docs/STAGE3-DISPLAY.md](docs/STAGE3-DISPLAY.md) | Ash-on-RTX status and open bugs |
 | `sdk/bootstrap.sh` / `sdk/build.sh` | Host prep and image build |
-| `overlay/overlay-nvidia-generic/` | Board overlay (drivers, BSP, auth) |
+| `overlay/overlay-nvidia-generic/` | Board overlay (drivers, BSP, auth, shims) |
 | `patches/login_manager/` | Skip Gaia; always apply `chrome_dev.conf` |
-| `patches/chrome/` | Ozone prefers nvidia-drm |
+| `patches/chrome/` | Ozone prefer nvidia-drm + modeset commit (0002/0003) |
+| `tools/arm-nvidia-auto-debug.sh` | Arm one-shot auto-debug on disk |
+| `tools/pull-nvidia-debug-logs.sh` | Pull H-STATE logs into repo root |
+| `tools/verify-modeset-from-logs.sh` | Score a pull |
+| `tools/copy-sbin-scripts-to-disk.sh` | Push sbin/shims without full emerge |
 | `tools/rebuild-auth-image.sh` | Fast rebuild for auth + login_manager |
-| `tools/rebuild-display-image.sh` | minigbm nvidia-drm backend; optional chromeos-chrome |
+| `tools/rebuild-display-image.sh` | minigbm / optional chromeos-chrome |
+| `tools/rebuild-chrome-0003.sh` | Ozone 0003 chrome rebuild |
 | `tools/flash.sh` | USB writer with disk allowlist |
 | `tools/install-to-disk.sh` | Device-side NVMe install |
 | [docs/INSTALL.md](docs/INSTALL.md) | Full phased runbook |

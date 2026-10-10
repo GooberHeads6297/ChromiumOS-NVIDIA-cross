@@ -85,6 +85,10 @@ if [ "$WITH_CHROME" -eq 1 ]; then
         "${CHROME_SRC_ROOT}/src/ui/ozone/platform/drm/common/drm_wrapper.cc" || \
         die "ozone nvidia legacy-KMS patch is not in ${CHROME_SRC_ROOT}
      Run: ${REPO_ROOT}/sdk/build.sh --board ${BOARD} link"
+    grep -q 'treating modes>0 as connected' \
+        "${CHROME_SRC_ROOT}/src/ui/ozone/platform/drm/common/drm_util.cc" || \
+        die "ozone nvidia modeset-commit patch (0003) is not in ${CHROME_SRC_ROOT}
+     Run: ${REPO_ROOT}/sdk/build.sh --board ${BOARD} link"
     cros_sdk --chrome-root="${CHROME_SRC_ROOT}" -- bash -c \
         "set -euo pipefail; export CHROME_ORIGIN=LOCAL_SOURCE; export CHROME_ROOT=/mnt/host/source/chrome_root; emerge-${BOARD} -v chromeos-base/chromeos-chrome"
 else

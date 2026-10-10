@@ -1,0 +1,205 @@
+From: nvidia-generic <nvidia-generic@local>
+Subject: [PATCH] ozone: nvidia-drm modeset commit + display ID / master recovery
+
+Fake GETCONNECTOR alone left Ash frozen: CommitModeset never bound
+controller_, FindDisplay missed host display IDs, and SchedulePageFlip
+no-oped without DRM master. Treat nvidia connectors with modes as
+connected, fall back to the sole GPU display on ID mismatch, reclaim
+SetMaster for presents, and promote modeset logs to WARNING.
+
+diff --git a/ui/ozone/platform/drm/common/drm_util.cc b/ui/ozone/platform/drm/common/drm_util.cc
+--- a/ui/ozone/platform/drm/common/drm_util.cc
++++ b/ui/ozone/platform/drm/common/drm_util.cc
+@@ -690,8 +690,24 @@
+       continue;
+     }
+ 
+-    if (connector->connection == DRM_MODE_CONNECTED) {
++    // nvidia-drm often reports connection=0 to Chrome while the panel is lit
++    // (modes + encoder still present). Treat modes>0 as connected so Ash can
++    // build a DisplaySnapshot and CommitModeset → SchedulePageFlip.
++    const std::optional<std::string> driver = drm.GetDriverName();
++    const bool nvidia_drm =
++        driver.has_value() &&
++        (*driver == "nvidia-drm" || *driver == "nvidia");
++    const bool treat_as_connected =
++        connector->connection == DRM_MODE_CONNECTED ||
++        (nvidia_drm && connector->count_modes > 0);
++    if (treat_as_connected) {
+       if (connector->count_modes != 0) {
++        if (connector->connection != DRM_MODE_CONNECTED) {
++          LOG(WARNING) << "[CONNECTOR:" << connector->connector_id
++                       << "] nvidia-drm: treating modes>0 as connected "
++                       << "(kernel connection=" << connector->connection
++                       << ")";
++        }
+         available_connectors.push_back(connector.get());
+       } else {
+         LOG(WARNING) << "[CONNECTOR:" << connector->connector_id
+diff --git a/ui/ozone/platform/drm/common/drm_wrapper.cc b/ui/ozone/platform/drm/common/drm_wrapper.cc
+--- a/ui/ozone/platform/drm/common/drm_wrapper.cc
++++ b/ui/ozone/platform/drm/common/drm_wrapper.cc
+@@ -222,6 +222,11 @@
+   TRACE_EVENT1("drm", "DrmWrapper::SetMaster", "path", device_path_.value());
+   DCHECK(drm_fd_.is_valid());
+   has_master_ = (drmSetMaster(drm_fd_.get()) == 0);
++  if (!has_master_) {
++    PLOG(WARNING) << "drmSetMaster failed for " << device_path_.value();
++  } else {
++    LOG(WARNING) << "drmSetMaster ok for " << device_path_.value();
++  }
+   return has_master_;
+ }
+ 
+diff --git a/ui/ozone/platform/drm/gpu/drm_gpu_display_manager.cc b/ui/ozone/platform/drm/gpu/drm_gpu_display_manager.cc
+--- a/ui/ozone/platform/drm/gpu/drm_gpu_display_manager.cc
++++ b/ui/ozone/platform/drm/gpu/drm_gpu_display_manager.cc
+@@ -397,6 +397,12 @@
+   }
+ 
+   NotifyScreenManager(displays_, old_displays);
++  LOG(WARNING) << "GetDisplays: " << displays_.size() << " display(s)";
++  for (const auto& d : displays_) {
++    LOG(WARNING) << "GetDisplays: id=" << d->display_id()
++                 << " connector=" << d->GetPrimaryConnectorId()
++                 << " crtc=" << d->GetPrimaryCrtcId();
++  }
+   return display_snapshots;
+ }
+ 
+@@ -760,6 +766,25 @@
+       return display.get();
+   }
+ 
++  // Host may query a stale/cached ID while GPU has exactly one panel (nvidia
++  // dual-GPU + connection probe races). Bind the sole display so Configure /
++  // HDCP / CommitModeset can proceed and controller_ gets mapped.
++  if (displays_.size() == 1) {
++    LOG(WARNING) << "FindDisplay: no ID " << display_id
++                 << "; using sole display ID " << displays_[0]->display_id();
++    return displays_[0].get();
++  }
++  if (!displays_.empty()) {
++    std::string ids;
++    for (const auto& d : displays_) {
++      if (!ids.empty())
++        ids += ",";
++      ids += base::NumberToString(d->display_id());
++    }
++    LOG(WARNING) << "FindDisplay: no ID " << display_id << "; known=[" << ids
++                 << "]";
++  }
++
+   return nullptr;
+ }
+ 
+diff --git a/ui/ozone/platform/drm/gpu/drm_window.cc b/ui/ozone/platform/drm/gpu/drm_window.cc
+--- a/ui/ozone/platform/drm/gpu/drm_window.cc
++++ b/ui/ozone/platform/drm/gpu/drm_window.cc
+@@ -8,6 +8,7 @@
+ #include <stdint.h>
+ #include <utility>
+ 
++#include "base/logging.h"
+ #include "base/time/time.h"
+ #include "base/trace_event/trace_event.h"
+ #include "third_party/skia/include/core/SkBitmap.h"
+@@ -118,7 +119,12 @@
+ 
+   last_submitted_planes_ = DrmOverlayPlane::Clone(planes);
+ 
+-  if (!controller_ || !controller_->GetDrmDevice()->has_master()) {
++  if (!controller_) {
++    static int no_controller_logs = 0;
++    if (no_controller_logs++ < 30) {
++      LOG(WARNING) << "SchedulePageFlip: no controller_ widget=" << widget_
++                   << " (CommitModeset never bound window)";
++    }
+     std::move(submission_callback)
+         .Run(gfx::SwapResult::SWAP_ACK,
+              /*release_fence=*/gfx::GpuFenceHandle());
+@@ -126,6 +132,26 @@
+     return;
+   }
+ 
++  // frecon / modeset-test can race SetMaster at startup; reclaim before
++  // failing the present (otherwise Ash freezes after ~2 compositor frames).
++  if (!controller_->GetDrmDevice()->has_master()) {
++    if (!controller_->GetDrmDevice()->SetMaster()) {
++      static int no_master_logs = 0;
++      if (no_master_logs++ < 30) {
++        LOG(WARNING) << "SchedulePageFlip: no DRM master on "
++                     << controller_->GetDrmDevice()->device_path().value();
++      }
++      std::move(submission_callback)
++          .Run(gfx::SwapResult::SWAP_ACK,
++               /*release_fence=*/gfx::GpuFenceHandle());
++      std::move(presentation_callback)
++          .Run(gfx::PresentationFeedback::Failure());
++      return;
++    }
++    LOG(WARNING) << "SchedulePageFlip: reclaimed DRM master on "
++                 << controller_->GetDrmDevice()->device_path().value();
++  }
++
+   controller_->SchedulePageFlip(std::move(planes),
+                                 std::move(submission_callback),
+                                 std::move(presentation_callback));
+diff --git a/ui/ozone/platform/drm/gpu/screen_manager.cc b/ui/ozone/platform/drm/gpu/screen_manager.cc
+--- a/ui/ozone/platform/drm/gpu/screen_manager.cc
++++ b/ui/ozone/platform/drm/gpu/screen_manager.cc
+@@ -379,9 +379,12 @@
+   for (const auto& configs_on_drm : displays_for_drm_devices) {
+     const std::vector<ControllerConfigParams>& drm_controllers_params =
+         configs_on_drm.second;
+-    VLOG(1) << "DRM " << (is_seamless_modeset ? "seamlessly " : "")
+-            << (commit_modeset ? "configuring: " : "testing: ")
+-            << GenerateConfigurationLogForController(drm_controllers_params);
++    // WARNING (not VLOG): nvidia-generic bring-up needs these in chrome logs
++    // without relying on --vmodule matching.
++    LOG(WARNING) << "DRM " << (is_seamless_modeset ? "seamlessly " : "")
++                 << (commit_modeset ? "configuring: " : "testing: ")
++                 << GenerateConfigurationLogForController(
++                        drm_controllers_params);
+ 
+     if (modeset_flags.Has(display::ModesetFlag::kTestModeset)) {
+       bool test_modeset =
+@@ -389,7 +392,8 @@
+                                        is_seamless_modeset) ||
+           TestAndSetLinearModifier(drm_controllers_params, is_seamless_modeset);
+       config_success &= test_modeset;
+-      VLOG(1) << "Test-modeset " << (test_modeset ? "succeeded." : "failed.");
++      LOG(WARNING) << "Test-modeset "
++                   << (test_modeset ? "succeeded." : "failed.");
+       if (!test_modeset)
+         continue;
+     }
+@@ -402,7 +406,7 @@
+                   is_seamless_modeset);
+       config_success &= modeset_commit_result;
+       if (modeset_commit_result) {
+-        VLOG(1) << "Modeset succeeded.";
++        LOG(WARNING) << "Modeset succeeded.";
+       } else {
+         LOG(ERROR) << "Modeset commit failed after a successful test-modeset.";
+       }
+@@ -842,8 +846,18 @@
+   // First create a unique mapping between a window and a controller. Note, a
+   // controller may be associated with at most 1 window.
+   for (const auto& controller : controllers_) {
+-    if (!controller->IsEnabled() || !controller->GetDrmDevice()->has_master()) {
++    if (!controller->IsEnabled())
+       continue;
++    if (!controller->GetDrmDevice()->has_master()) {
++      // Reclaim master so window↔controller mapping is not skipped after a
++      // frecon/modeset-test race (otherwise SchedulePageFlip never runs).
++      if (!controller->GetDrmDevice()->SetMaster()) {
++        LOG(WARNING) << "UpdateControllerToWindowMapping: no DRM master on "
++                     << controller->GetDrmDevice()->device_path().value();
++        continue;
++      }
++      LOG(WARNING) << "UpdateControllerToWindowMapping: reclaimed DRM master on "
++                   << controller->GetDrmDevice()->device_path().value();
+     }
+ 
+     DrmWindow* window = FindWindowAt(

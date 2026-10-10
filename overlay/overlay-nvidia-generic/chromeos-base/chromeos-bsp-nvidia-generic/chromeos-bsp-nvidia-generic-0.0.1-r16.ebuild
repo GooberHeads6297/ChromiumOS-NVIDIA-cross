@@ -35,6 +35,7 @@ src_install() {
 	dosbin "${FILESDIR}/install-to-disk.sh"
 	newsbin "${FILESDIR}/nvidia-gbm-probe.py" nvidia-gbm-probe
 	newsbin "${FILESDIR}/nvidia-drm-dump.py" nvidia-drm-dump
+	newsbin "${FILESDIR}/nvidia-rtx-debug.py" nvidia-rtx-debug
 
 	insinto /etc/init
 	doins "${FILESDIR}/gpu-guard.conf"
@@ -58,4 +59,5 @@ pkg_postinst() {
 	elog "before ui, DRM/NVIDIA nodes forced to 0666 for bring-up."
 	elog "Diagnose GBM with: nvidia-gbm-probe"
 	elog "Dump connectors with: nvidia-drm-dump"
+	elog "Full RTX dump: nvidia-rtx-debug"
 }
