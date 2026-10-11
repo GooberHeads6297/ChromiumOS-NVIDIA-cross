@@ -8,19 +8,32 @@ Read [SAFETY.md](SAFETY.md) first. Ubuntu on `sda` is never a flash or install t
 
 | Detail | Where |
 | --- | --- |
-| **Auto-debug (default Stage 3 loop)** | **[docs/AUTO-DEBUG.md](docs/AUTO-DEBUG.md)** |
-| Stage 3 display status / open bugs | [docs/STAGE3-DISPLAY.md](docs/STAGE3-DISPLAY.md) |
+| **Habitable boots (persistent GUI + Gaia off)** | **[docs/HABITABLE.md](docs/HABITABLE.md)** |
+| Auto-debug (Stage 3 diagnosis loop) | [docs/AUTO-DEBUG.md](docs/AUTO-DEBUG.md) |
+| Stage 3 display status | [docs/STAGE3-DISPLAY.md](docs/STAGE3-DISPLAY.md) |
 | Full USB → NVMe → Steam runbook | [docs/INSTALL.md](docs/INSTALL.md) |
 | Local accounts / cryptohome / Crostini | [docs/LOCAL-ACCOUNTS.md](docs/LOCAL-ACCOUNTS.md) |
 | Settled hardware and earlier handoff | [docs/HANDOFF.md](docs/HANDOFF.md) |
 
 ---
 
-## Auto-debug — how we develop Stage 3
+## Habitable boots (daily use)
+
+After RTX Ash works, stop re-arming auto-debug. Install the every-boot bring-up once:
+
+```bash
+sudo ./tools/enable-persistent-gui.sh /dev/nvme1n1
+```
+
+Then every ChromiumOS boot: pink splash → login UI. Create
+`localuser@localhost` at **http://127.0.0.1:17891/** — Gaia disable + login-pod
+registration run automatically. Details: [docs/HABITABLE.md](docs/HABITABLE.md).
+
+## Auto-debug — Stage 3 diagnosis only
 
 VT2 is unreliable once frecon and Ash fight over nvidia-drm master. **Arm a one-shot
-debug flag from Ubuntu, boot, power off, pull logs.** That loop is the backbone of
-this project's display work — treat it as first-class, not an afterthought.
+debug flag from Ubuntu, boot, power off, pull logs** when bringing up display bugs —
+not for daily boots.
 
 ```bash
 cd "/home/gooberheads/CodeEnv/NVIDIA cross ChromeOS"
@@ -53,7 +66,8 @@ Full flag table, soft-capture notes, and what `debug.sh` sections mean:
 | 0 | Safety harness | Done |
 | 1–2 | USB/NVMe boot, NVIDIA modules, pink RTX splash | Working |
 | Auth | Local cryptohome + login pod, no Google | In tree / on disk |
-| **3** | **Ash UI on nvidia-drm (RTX HDMI)** | **UI boots (pink → login). Still: low FPS, invisible mouse, horizontal tear bands** |
+| **3** | **Ash UI on nvidia-drm (RTX HDMI)** | **Working (pageflips via GBM import FAKE-OK). Persist with [HABITABLE.md](docs/HABITABLE.md)** |
+| Habitable | Every-boot GUI + Gaia off after :17891 account | `enable-persistent-gui.sh` + `disable-gaia-after-local-account` |
 | 4 | Steam/Proton | Blocked on Stage 3 polish |
 
 Open Stage 3 bugs and the stack we used to get past black screens:

@@ -151,7 +151,15 @@ cryptohome --action=invalidate_auth_session --auth_session_id="$SID" >/dev/null 
 log "OK — created cryptohome for ${USER_EMAIL}"
 ls -la /home/.shadow 2>/dev/null | sed 's/^/  | /' || true
 
-if [ -x /usr/sbin/register-local-login.sh ]; then
+if [ -x /usr/sbin/disable-gaia-after-local-account ]; then
+    log "disable-gaia-after-local-account ${USER_EMAIL}"
+    /usr/sbin/disable-gaia-after-local-account "${USER_EMAIL}" || \
+        log "WARN: disable-gaia-after-local-account failed"
+elif [ -x /usr/sbin/scripts/disable-gaia-after-local-account.sh ]; then
+    log "disable-gaia-after-local-account.sh ${USER_EMAIL}"
+    /usr/sbin/scripts/disable-gaia-after-local-account.sh "${USER_EMAIL}" || \
+        log "WARN: disable-gaia helper failed"
+elif [ -x /usr/sbin/register-local-login.sh ]; then
     log "registering ${USER_EMAIL} with Chrome login (Get Started skip)"
     /usr/sbin/register-local-login.sh --user "${USER_EMAIL}" || \
         log "WARN: register-local-login.sh failed — run it by hand"

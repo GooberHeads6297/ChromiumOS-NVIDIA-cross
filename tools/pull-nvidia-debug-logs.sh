@@ -79,22 +79,20 @@ for c in "${CANDS[@]:-}"; do
     SRC=$c
   fi
 done
-if [ -z "$SRC" ]; then
-  echo "no nvidia-debug.log under ${STATE}" >&2
-  echo "looked in: unencrypted/ and dev_image/tmp/" >&2
-  find "$MNT" -name 'nvidia-debug.log' 2>/dev/null | head || true
-  exit 1
+if [ -n "$SRC" ]; then
+  echo "source: $SRC"
+  echo "mtime:  $(stat -c '%y' "$SRC")  size=$BEST"
+  echo "--- header ---"
+  head -5 "$SRC"
+  echo "---------------"
+  # strip trailing NUL padding from interrupted snaps
+  tr -d '\000' < "$SRC" > "${REPO_ROOT}/nvidia-debug.log"
+else
+  echo "note: no nvidia-debug.log (normal if using persistent GUI bring-up only)"
 fi
 
-echo "source: $SRC"
-echo "mtime:  $(stat -c '%y' "$SRC")  size=$BEST"
-echo "--- header ---"
-head -5 "$SRC"
-echo "---------------"
-# strip trailing NUL padding from interrupted snaps
-tr -d '\000' < "$SRC" > "${REPO_ROOT}/nvidia-debug.log"
-
-for name in drm-addfb.log gbm-compat.log nvidia-auto-debug-upstart.log chrome.log; do
+for name in drm-addfb.log gbm-compat.log nvidia-auto-debug-upstart.log \
+            nvidia-gui-bringup.log disable-gaia.log chrome.log; do
   BESTF=""
   BESTMT=0
   BESTSZ=0
@@ -126,7 +124,8 @@ for n in "${NOTES[@]:-}"; do
   echo "copied $base"
 done
 
-for f in nvidia-debug.log drm-addfb.log gbm-compat.log nvidia-auto-debug-upstart.log chrome.log; do
+for f in nvidia-debug.log drm-addfb.log gbm-compat.log nvidia-auto-debug-upstart.log \
+         nvidia-gui-bringup.log disable-gaia.log chrome.log; do
   [ -f "${REPO_ROOT}/$f" ] || continue
   chown --reference="${REPO_ROOT}/tools/pull-nvidia-debug-logs.sh" "${REPO_ROOT}/$f" 2>/dev/null || true
 done
@@ -134,17 +133,22 @@ chown --reference="${REPO_ROOT}/tools/pull-nvidia-debug-logs.sh" \
   "${REPO_ROOT}"/chrome-capture-*.txt 2>/dev/null || true
 
 echo
-if grep -q 'drm-modeset-test' "${REPO_ROOT}/nvidia-debug.log"; then
+if [ -f "${REPO_ROOT}/nvidia-gui-bringup.log" ] &&
+   grep -q 'bringup done' "${REPO_ROOT}/nvidia-gui-bringup.log"; then
+  echo "OK: nvidia-gui-bringup ran (persistent GUI path)"
+fi
+if [ -f "${REPO_ROOT}/nvidia-debug.log" ] &&
+   grep -q 'drm-modeset-test' "${REPO_ROOT}/nvidia-debug.log"; then
   echo "OK: log contains drm-modeset-test (debug.sh ran)"
-else
-  echo "NOTE: no drm-modeset-test in log — arm with tools/arm-nvidia-auto-debug.sh and reboot"
+elif [ ! -f "${REPO_ROOT}/nvidia-debug.log" ]; then
+  echo "note: no debug.sh log (normal for persistent GUI boots)"
 fi
 if [ -f "${REPO_ROOT}/nvidia-auto-debug-upstart.log" ]; then
   echo "--- auto-debug upstart (tail) ---"
   tail -20 "${REPO_ROOT}/nvidia-auto-debug-upstart.log" || true
 fi
-if grep -qE 'SetCrtc OK|PAGE_FLIP|ioctl SETCRTC' "${REPO_ROOT}/nvidia-debug.log" \
-   "${REPO_ROOT}/drm-addfb.log" 2>/dev/null; then
+if grep -qE 'SetCrtc OK|PAGE_FLIP|ioctl SETCRTC|auto-SetCrtc OK' \
+   "${REPO_ROOT}/nvidia-debug.log" "${REPO_ROOT}/drm-addfb.log" 2>/dev/null; then
   echo "OK: modeset/pageflip activity present"
 fi
-echo "done -> ${REPO_ROOT}/nvidia-debug.log"
+echo "done -> ${REPO_ROOT}/"

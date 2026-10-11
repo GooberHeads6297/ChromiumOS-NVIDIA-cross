@@ -246,9 +246,11 @@ static int fake_connector_from_target(struct drm_mode_get_connector *c) {
     return -1;
   c->connection = 1; /* DRM_MODE_CONNECTED */
   c->connector_id = conn;
-  if (c->count_modes < 1)
-    c->count_modes = 1;
-  if (c->modes_ptr && c->count_modes >= 1) {
+  /* Only expose the probed preferred mode. EDID junk (720x576 / 640x480)
+   * makes Ozone Test-modeset thrash CreateScanoutBuffer and disable the
+   * display before CommitModeset — then SchedulePageFlip has no controller_. */
+  c->count_modes = 1;
+  if (c->modes_ptr) {
     struct drm_mode_modeinfo *dst =
         (struct drm_mode_modeinfo *)(uintptr_t)c->modes_ptr;
     dst[0] = mode;
@@ -865,8 +867,8 @@ int drmIoctl(int fd, unsigned long request, void *arg) {
       if (c->connector_id == want_conn) {
         uint32_t enc = g_tgt_encoder ? g_tgt_encoder : 126;
         c->connection = 1;
-        if (c->count_modes < 1)
-          c->count_modes = 1;
+        /* Prefer one native mode only — see fake_connector_from_target. */
+        c->count_modes = 1;
         if (c->modes_ptr) {
           struct drm_mode_modeinfo *dst =
               (struct drm_mode_modeinfo *)(uintptr_t)c->modes_ptr;

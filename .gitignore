@@ -17,6 +17,8 @@
 /drm-addfb.log
 /gbm-compat.log
 /nvidia-auto-debug-upstart.log
+/nvidia-gui-bringup.log
+/disable-gaia.log
 /chrome.log
 /chrome-capture-*.txt
 

@@ -1,8 +1,11 @@
 # Auto-debug (headless Stage 3 capture)
 
-**Primary diagnosis loop for this project.** VT2 login races with frecon / Ash on
-nvidia-drm, so we do **not** rely on Ctrl-Alt-F2 for graphics bring-up. Arm a
-one-shot flag from Ubuntu, boot ChromiumOS, power off, pull logs back to the host.
+**Diagnosis loop** (not daily boots). For every-boot Ash without re-arming, use
+[HABITABLE.md](HABITABLE.md) / `tools/enable-persistent-gui.sh` instead.
+
+VT2 login races with frecon / Ash on nvidia-drm, so we do **not** rely on
+Ctrl-Alt-F2 for graphics bring-up. Arm a one-shot flag from Ubuntu, boot
+ChromiumOS, power off, pull logs back to the host.
 
 Pink splash on the RTX HDMI means nvidia-drm fbdev is alive. That is expected and
 good — it is not a failure by itself.

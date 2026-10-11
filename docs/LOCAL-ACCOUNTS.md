@@ -55,6 +55,11 @@ After reboot from NVMe, open the same URL (not Guest) and set the password for
 `localuser@localhost`. The AuthFactor label is **`local-password`** (the HTTP UI
 passes `--key-label local-password` into `create-local-account.sh`).
 
+After create, **`disable-gaia-after-local-account`** runs automatically (from the
+HTTP UI and from `create-local-account.sh`): merges `--disable-gaia-services` /
+offline flags, runs `register-local-login.sh`, soft-restarts `ui`. See
+[HABITABLE.md](HABITABLE.md).
+
 Chrome’s login pod shows a **password** field only when Local State has
 `OAuthTokenStatus[email]=4` (VALID) and `UserForceOnlineSignin=false`. Without
 that, Ash treats the regular user as needing Google verification. `register-local-login.sh`

@@ -28,10 +28,17 @@ src_install() {
 	newsbin "${FILESDIR}/scripts/debug.sh" nvidia-generic-debug
 	newsbin "${FILESDIR}/scripts/enable-nvidia-egl.sh" enable-nvidia-egl
 	newsbin "${FILESDIR}/scripts/create-nvidia-nodes.sh" create-nvidia-nodes
+	newsbin "${FILESDIR}/scripts/nvidia-gui-bringup.sh" nvidia-gui-bringup
+	newsbin "${FILESDIR}/scripts/disable-gaia-after-local-account.sh" \
+		disable-gaia-after-local-account
+	newsbin "${FILESDIR}/scripts/capture-chrome-logs.sh" capture-chrome-logs
 	exeinto /usr/share/chromiumos-nvidia-cross/scripts
 	doexe "${FILESDIR}/scripts/debug.sh"
 	doexe "${FILESDIR}/scripts/enable-nvidia-egl.sh"
 	doexe "${FILESDIR}/scripts/create-nvidia-nodes.sh"
+	doexe "${FILESDIR}/scripts/nvidia-gui-bringup.sh"
+	doexe "${FILESDIR}/scripts/disable-gaia-after-local-account.sh"
+	doexe "${FILESDIR}/scripts/capture-chrome-logs.sh"
 
 	dosbin "${FILESDIR}/ensure-software-tpm.sh"
 	dosbin "${FILESDIR}/collect-auth-debug.sh"
@@ -62,6 +69,7 @@ src_install() {
 	newins "${FILESDIR}/ui.override" ui.override
 	doins "${FILESDIR}/nvidia-devnodes.conf"
 	doins "${FILESDIR}/nvidia-generic-auto-debug.conf"
+	doins "${FILESDIR}/nvidia-gui-bringup.conf"
 
 	insinto /etc
 	newins "${FILESDIR}/chrome_dev.conf.auth" chrome_dev.conf.nvidia-generic-auth

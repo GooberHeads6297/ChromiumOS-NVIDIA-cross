@@ -1,0 +1,34 @@
+From: nvidia-generic <nvidia-generic@local>
+Subject: [PATCH] ozone: nvidia-drm scanout CreateBuffer fallback
+
+Test-modeset calls CreateBufferWithModifiers(SCANOUT, preferred mods).
+On nvidia-drm the ChromeOS create+import verification loop often fails
+even though plain CreateBuffer(SCANOUT|RENDERING) works — Ash then never
+CommitModesets, SchedulePageFlip sees no controller_, and the AddFB shim
+can only bootstrap a single SetCrtc (laggy UI, invisible cursor, tear).
+
+Fall back to CreateBuffer without modifiers when the modifier path fails.
+
+diff --git a/ui/ozone/platform/drm/gpu/screen_manager.cc b/ui/ozone/platform/drm/gpu/screen_manager.cc
+--- a/ui/ozone/platform/drm/gpu/screen_manager.cc
++++ b/ui/ozone/platform/drm/gpu/screen_manager.cc
+@@ -933,10 +933,26 @@
+   // Get the buffer that best reflects what the next Page Flip will look like,
+   // which is using the preferred modifiers from the controllers.
+   std::unique_ptr<GbmBuffer> buffer =
+       drm->gbm_device()->CreateBufferWithModifiers(
+           fourcc_format, bounds.size(), GBM_BO_USE_SCANOUT, modifiers);
++  if (!buffer) {
++    // nvidia-drm: modifier create+import verify fails; plain create works for
++    // compositor buffers (see gbm-minigbm-compat). Retry without modifiers.
++    LOG(WARNING) << "CreateBufferWithModifiers failed " << bounds.ToString()
++                 << " mods=" << modifiers.size()
++                 << "; retry CreateBuffer(SCANOUT|RENDERING)";
++    buffer = drm->gbm_device()->CreateBuffer(
++        fourcc_format, bounds.size(),
++        GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
++  }
+   if (!buffer) {
+     LOG(ERROR) << "Failed to create scanout buffer";
+     return DrmOverlayPlaneList();
+   }

@@ -50,12 +50,22 @@ if [ -f "$DEST/chrome.log" ]; then
   {
     echo "---- chrome counts ----"
     for pat in 'forcing legacy' 'Modeset succeeded' 'GetDisplays:' \
-               'SchedulePageFlip' 'eglCreateImage failed' '0x00008CD6' \
-               'Unable to initialize SkSurface' 'Restarting GPU' \
+               'SchedulePageFlip: no controller_' 'SchedulePageFlip' \
+               'Failed to create scanout buffer' 'Test-modeset' \
+               'Display configuration failed' 'eglCreateImage failed' \
+               '0x00008CD6' 'Unable to initialize SkSurface' 'Restarting GPU' \
                'drmSetMaster' 'Page flip' 'Failed to authenticate'; do
       n=$(grep -cF "$pat" "$DEST/chrome.log" 2>/dev/null || echo 0)
       echo "  $n	$pat"
     done
+    if [ -f "$DEST/drm-addfb.log" ]; then
+      echo "---- drm-addfb present ----"
+      for pat in 'auto-SetCrtc OK' 'ioctl SETCRTC' 'ioctl PAGE_FLIP' \
+                 'fake GETCONNECTOR' 'modes=1 '; do
+        n=$(grep -cF "$pat" "$DEST/drm-addfb.log" 2>/dev/null || echo 0)
+        echo "  $n	$pat"
+      done
+    fi
     echo "---- last ERROR/WARNING (40) ----"
     grep -E 'ERROR|WARNING' "$DEST/chrome.log" 2>/dev/null | tail -40 || true
   } >>"$note"

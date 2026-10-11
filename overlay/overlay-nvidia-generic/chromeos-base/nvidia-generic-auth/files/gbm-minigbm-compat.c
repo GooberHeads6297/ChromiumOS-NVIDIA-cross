@@ -95,6 +95,23 @@ static int (*real_gbm_surface_has_free_buffers)(struct gbm_surface *);
 #define GBM_BO_USE_RENDERING (1u << 2)
 #define GBM_BO_USE_LINEAR (1u << 4)
 #define GBM_BO_USE_PROTECTED (1u << 5)
+#define GBM_BO_IMPORT_FD_MODIFIER 0x5505u
+#define GBM_MAX_PLANES 4
+
+/* Matches Mesa/minigbm gbm_import_fd_modifier_data (verify-only import). */
+struct gbm_import_fd_modifier_data {
+  uint32_t width;
+  uint32_t height;
+  uint32_t format;
+  uint32_t num_fds;
+  int fds[GBM_MAX_PLANES];
+  int strides[GBM_MAX_PLANES];
+  int offsets[GBM_MAX_PLANES];
+  uint64_t modifier;
+};
+
+static unsigned g_import_fail_logs;
+static unsigned g_import_fake_logs;
 
 static void glog(const char *fmt, ...) {
   FILE *fp = fopen("/usr/local/tmp/gbm-compat.log", "a");
@@ -209,9 +226,28 @@ const char *gbm_device_get_backend_name(struct gbm_device *d) {
 }
 int gbm_device_is_format_supported(struct gbm_device *d, uint32_t f, uint32_t u) {
   LOAD();
-  return real_gbm_device_is_format_supported
-             ? real_gbm_device_is_format_supported(d, f, u)
-             : 0;
+  int ok = real_gbm_device_is_format_supported
+               ? real_gbm_device_is_format_supported(d, f, u)
+               : 0;
+  /* Mesa GBM on nvidia-drm often rejects SCANOUT before Ozone ever calls
+   * gbm_bo_create — that yields "Failed to create scanout buffer" during
+   * Test-modeset, so Chrome never binds controller_ / pageflips. Our create
+   * path already allocates XR24/AR24 scanout via the NVIDIA backend. */
+  if (!ok) {
+    switch (f) {
+    case 0x34325258: /* DRM_FORMAT_XR24 */
+    case 0x34325241: /* DRM_FORMAT_AR24 */
+    case 0x34324258: /* DRM_FORMAT_XB24 */
+    case 0x34324241: /* DRM_FORMAT_AB24 */
+      ok = 1;
+      glog("gbm-minigbm-compat: is_format_supported override fmt=0x%x use=0x%x\n",
+           f, u);
+      break;
+    default:
+      break;
+    }
+  }
+  return ok;
 }
 int gbm_device_get_format_modifier_plane_count(struct gbm_device *d, uint32_t f,
                                                uint64_t m) {
@@ -259,7 +295,12 @@ struct gbm_bo *gbm_bo_create_with_modifiers(struct gbm_device *d, uint32_t w,
                                             const uint64_t *m, unsigned int n) {
   LOAD();
   struct gbm_bo *bo = NULL;
-  if (real_gbm_bo_create_with_modifiers && m && n)
+  /* Ozone TestAndSetLinearModifier passes LINEAR-only; NVIDIA scanout rejects
+   * that. Skip straight to plain create (RENDERING|SCANOUT). */
+  int linear_only = 0;
+  if (m && n == 1 && m[0] == 0)
+    linear_only = 1;
+  if (!linear_only && real_gbm_bo_create_with_modifiers && m && n)
     bo = real_gbm_bo_create_with_modifiers(d, w, h, f, m, n);
   if (!bo)
     bo = gbm_bo_create(d, w, h, f,
@@ -267,7 +308,9 @@ struct gbm_bo *gbm_bo_create_with_modifiers(struct gbm_device *d, uint32_t w,
   if (!bo)
     log_fail("gbm_bo_create_with_modifiers", w, h, f, 0);
   else
-    glog("gbm-minigbm-compat: nvidia-bo+mod ok %ux%u fmt=0x%x\n", w, h, f);
+    glog("gbm-minigbm-compat: nvidia-bo+mod ok %ux%u fmt=0x%x n=%u mod0=0x%llx%s\n",
+         w, h, f, n, (unsigned long long)(m && n ? m[0] : 0),
+         linear_only ? " linear-skip" : "");
   return bo;
 }
 
@@ -294,7 +337,50 @@ struct gbm_bo *gbm_bo_create_with_modifiers2(struct gbm_device *d, uint32_t w,
 struct gbm_bo *gbm_bo_import(struct gbm_device *d, uint32_t t, void *b,
                              uint32_t u) {
   LOAD();
-  return real_gbm_bo_import ? real_gbm_bo_import(d, t, b, u) : NULL;
+  if (!real_gbm_bo_import)
+    return NULL;
+  /* ChromeOS CreateBufferWithModifiers verifies modifiers via create+import
+   * with GBM_BO_USE_SCANOUT only. Mesa/NVIDIA reject FD_MODIFIER import here
+   * (see gbm-compat: import FAILED type=21765) even when create succeeded —
+   * Ozone then never binds controller_. Chrome destroys a successful import
+   * immediately after the check, so a disposable stand-in BO is enough. */
+  struct gbm_bo *bo = real_gbm_bo_import(d, t, b, u);
+  if (bo)
+    return bo;
+  uint32_t tries[] = {
+      u | GBM_BO_USE_RENDERING | GBM_BO_USE_SCANOUT,
+      GBM_BO_USE_RENDERING | GBM_BO_USE_SCANOUT,
+      GBM_BO_USE_SCANOUT,
+      0,
+  };
+  for (unsigned i = 0; i < sizeof(tries) / sizeof(tries[0]); i++) {
+    if (tries[i] == u)
+      continue;
+    bo = real_gbm_bo_import(d, t, b, tries[i]);
+    if (bo) {
+      if (g_import_fake_logs++ < 8)
+        glog("gbm-minigbm-compat: import ok type=%u use=0x%x->0x%x\n", t, u,
+             tries[i]);
+      return bo;
+    }
+  }
+  if (t == GBM_BO_IMPORT_FD_MODIFIER && b) {
+    const struct gbm_import_fd_modifier_data *fd = b;
+    uint32_t w = fd->width ? fd->width : 1;
+    uint32_t h = fd->height ? fd->height : 1;
+    bo = gbm_bo_create(d, w, h, fd->format,
+                       GBM_BO_USE_RENDERING | GBM_BO_USE_SCANOUT);
+    if (bo) {
+      if (g_import_fake_logs++ < 16)
+        glog("gbm-minigbm-compat: import FAKE-OK verify %ux%u fmt=0x%x "
+             "mod=0x%llx (Chrome destroys this BO)\n",
+             w, h, fd->format, (unsigned long long)fd->modifier);
+      return bo;
+    }
+  }
+  if (g_import_fail_logs++ < 8)
+    glog("gbm-minigbm-compat: import FAILED type=%u use=0x%x\n", t, u);
+  return NULL;
 }
 void gbm_bo_destroy(struct gbm_bo *bo) {
   LOAD();

@@ -34,6 +34,9 @@ fi
 # Chrome Ozone runtime
 if have 'forcing legacy' "$DEBUG"; then ok "legacy KMS active at runtime"; else bad "no forcing legacy KMS at runtime"; fi
 # Prefer chrome WARNING line; ignore section-D "  0	Modeset succeeded" count rows.
+if have 'SchedulePageFlip: no controller_' "$DEBUG"; then
+  bad "SchedulePageFlip: no controller_ (CommitModeset never bound window)"
+fi
 if grep -E 'WARNING.*Modeset succeeded\.|Modeset succeeded\.$' "$DEBUG" >/dev/null 2>&1; then
   ok "Modeset succeeded (chrome WARNING)"
 elif grep -E $'^\s*[1-9][0-9]*\tModeset succeeded' "$DEBUG" >/dev/null 2>&1; then

@@ -1,7 +1,8 @@
 #!/bin/bash
-# Install /usr/sbin/scripts plus NVIDIA-only EGL wrapper onto a ChromiumOS disk.
+# Install sbin scripts, GBM/AddFB shims, persistent GUI bring-up, Gaia hooks.
 #
-#   sudo ./tools/copy-sbin-scripts-to-disk.sh /dev/nvme0n1
+#   sudo ./tools/copy-sbin-scripts-to-disk.sh /dev/nvme1n1
+#   sudo ./tools/enable-persistent-gui.sh /dev/nvme1n1   # preferred for daily boots
 #
 # Applies (offline, no restart ui):
 #   /usr/sbin/scripts/debug.sh
@@ -94,6 +95,14 @@ apply_root() {
         install -m 0755 "${AUTH_FILES}/scripts/capture-chrome-logs.sh" \
             "${dest_scripts}/capture-chrome-logs.sh"
     fi
+    if [ -f "${AUTH_FILES}/scripts/nvidia-gui-bringup.sh" ]; then
+        install -m 0755 "${AUTH_FILES}/scripts/nvidia-gui-bringup.sh" \
+            "${dest_scripts}/nvidia-gui-bringup.sh"
+    fi
+    if [ -f "${AUTH_FILES}/scripts/disable-gaia-after-local-account.sh" ]; then
+        install -m 0755 "${AUTH_FILES}/scripts/disable-gaia-after-local-account.sh" \
+            "${dest_scripts}/disable-gaia-after-local-account.sh"
+    fi
     # Flat sbin names from the ebuild (CrOS QA forbids /usr/sbin/scripts in image).
     install -m 0755 "${AUTH_FILES}/scripts/debug.sh" \
         "${MNT}/usr/sbin/nvidia-generic-debug"
@@ -105,12 +114,37 @@ apply_root() {
         install -m 0755 "${AUTH_FILES}/scripts/capture-chrome-logs.sh" \
             "${MNT}/usr/sbin/capture-chrome-logs"
     fi
+    if [ -f "${AUTH_FILES}/scripts/nvidia-gui-bringup.sh" ]; then
+        install -m 0755 "${AUTH_FILES}/scripts/nvidia-gui-bringup.sh" \
+            "${MNT}/usr/sbin/nvidia-gui-bringup"
+    fi
+    if [ -f "${AUTH_FILES}/scripts/disable-gaia-after-local-account.sh" ]; then
+        install -m 0755 "${AUTH_FILES}/scripts/disable-gaia-after-local-account.sh" \
+            "${MNT}/usr/sbin/disable-gaia-after-local-account"
+    fi
+    if [ -f "${AUTH_FILES}/create-local-account.sh" ]; then
+        install -m 0755 "${AUTH_FILES}/create-local-account.sh" \
+            "${MNT}/usr/sbin/create-local-account.sh"
+    fi
+    if [ -f "${AUTH_FILES}/local-account-setup.py" ]; then
+        mkdir -p "${MNT}/usr/share/chromiumos-nvidia-cross"
+        install -m 0755 "${AUTH_FILES}/local-account-setup.py" \
+            "${MNT}/usr/share/chromiumos-nvidia-cross/local-account-setup.py"
+    fi
     install -m 0755 "${AUTH_FILES}/scripts/debug.sh" \
         "${MNT}/usr/share/chromiumos-nvidia-cross/scripts/debug.sh"
     install -m 0755 "${AUTH_FILES}/scripts/enable-nvidia-egl.sh" \
         "${MNT}/usr/share/chromiumos-nvidia-cross/scripts/enable-nvidia-egl.sh"
     install -m 0755 "${AUTH_FILES}/scripts/create-nvidia-nodes.sh" \
         "${MNT}/usr/share/chromiumos-nvidia-cross/scripts/create-nvidia-nodes.sh"
+    if [ -f "${AUTH_FILES}/scripts/nvidia-gui-bringup.sh" ]; then
+        install -m 0755 "${AUTH_FILES}/scripts/nvidia-gui-bringup.sh" \
+            "${MNT}/usr/share/chromiumos-nvidia-cross/scripts/nvidia-gui-bringup.sh"
+    fi
+    if [ -f "${AUTH_FILES}/scripts/disable-gaia-after-local-account.sh" ]; then
+        install -m 0755 "${AUTH_FILES}/scripts/disable-gaia-after-local-account.sh" \
+            "${MNT}/usr/share/chromiumos-nvidia-cross/scripts/disable-gaia-after-local-account.sh"
+    fi
     install -m 0755 "${AUTH_FILES}/chrome-nvidia-egl" \
         "${MNT}/usr/sbin/chrome-nvidia-egl"
     if [ -f "${AUTH_FILES}/drm-take-master" ]; then
@@ -138,6 +172,24 @@ apply_root() {
         install -m 0644 "${AUTH_FILES}/nvidia-generic-auto-debug.conf" \
             "${MNT}/etc/init/nvidia-generic-auto-debug.conf"
         echo "  installed nvidia-generic-auto-debug.conf (flag-file headless debug)"
+    fi
+    if [ -f "${AUTH_FILES}/nvidia-gui-bringup.conf" ]; then
+        install -m 0644 "${AUTH_FILES}/nvidia-gui-bringup.conf" \
+            "${MNT}/etc/init/nvidia-gui-bringup.conf"
+        echo "  installed nvidia-gui-bringup.conf (EVERY boot → GUI)"
+    fi
+    # Persist Gaia-off flags on rootfs chrome_dev.conf (not only after account create).
+    if [ -f "${AUTH_FILES}/chrome_dev.conf.auth" ] && [ -f "${MNT}/etc/chrome_dev.conf" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in
+                ''|\#*) continue ;;
+                --*)
+                    grep -qF -- "$line" "${MNT}/etc/chrome_dev.conf" 2>/dev/null || \
+                        printf '%s\n' "$line" >> "${MNT}/etc/chrome_dev.conf"
+                    ;;
+            esac
+        done < "${AUTH_FILES}/chrome_dev.conf.auth"
+        echo "  merged chrome_dev.conf.auth (disable-gaia / oobe-skip)"
     fi
     if [ -f "${BSP_FILES}/release-nvidia-drm-master.sh" ]; then
         mkdir -p "${MNT}/usr/share/chromiumos-nvidia-cross"
@@ -173,7 +225,8 @@ apply_root() {
     ls -l "${dest_scripts}/debug.sh" \
         "${MNT}/usr/sbin/nvidia-generic-debug" \
         "${MNT}/usr/sbin/chrome-nvidia-egl" \
-        "${MNT}/etc/init/ui.override"
+        "${MNT}/etc/init/ui.override" \
+        "${MNT}/etc/init/nvidia-gui-bringup.conf" 2>/dev/null || true
 }
 
 ROOTS=()
@@ -221,6 +274,14 @@ if [ -n "$STATE" ]; then
         install -m 0755 "${AUTH_FILES}/scripts/capture-chrome-logs.sh" \
             "${MNT}/dev_image/sbin/scripts/capture-chrome-logs.sh"
     fi
+    if [ -f "${AUTH_FILES}/scripts/nvidia-gui-bringup.sh" ]; then
+        install -m 0755 "${AUTH_FILES}/scripts/nvidia-gui-bringup.sh" \
+            "${MNT}/dev_image/sbin/scripts/nvidia-gui-bringup.sh"
+    fi
+    if [ -f "${AUTH_FILES}/scripts/disable-gaia-after-local-account.sh" ]; then
+        install -m 0755 "${AUTH_FILES}/scripts/disable-gaia-after-local-account.sh" \
+            "${MNT}/dev_image/sbin/scripts/disable-gaia-after-local-account.sh"
+    fi
     install -m 0755 "${AUTH_FILES}/scripts/debug.sh" \
         "${MNT}/dev_image/sbin/nvidia-generic-debug"
     install -m 0755 "${AUTH_FILES}/scripts/enable-nvidia-egl.sh" \
@@ -230,6 +291,14 @@ if [ -n "$STATE" ]; then
     if [ -f "${AUTH_FILES}/scripts/capture-chrome-logs.sh" ]; then
         install -m 0755 "${AUTH_FILES}/scripts/capture-chrome-logs.sh" \
             "${MNT}/dev_image/sbin/capture-chrome-logs"
+    fi
+    if [ -f "${AUTH_FILES}/scripts/nvidia-gui-bringup.sh" ]; then
+        install -m 0755 "${AUTH_FILES}/scripts/nvidia-gui-bringup.sh" \
+            "${MNT}/dev_image/sbin/nvidia-gui-bringup"
+    fi
+    if [ -f "${AUTH_FILES}/scripts/disable-gaia-after-local-account.sh" ]; then
+        install -m 0755 "${AUTH_FILES}/scripts/disable-gaia-after-local-account.sh" \
+            "${MNT}/dev_image/sbin/disable-gaia-after-local-account"
     fi
     install -m 0755 "${AUTH_FILES}/chrome-nvidia-egl" \
         "${MNT}/dev_image/sbin/chrome-nvidia-egl"

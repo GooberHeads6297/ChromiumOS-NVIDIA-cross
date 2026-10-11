@@ -18,6 +18,7 @@ from urllib.parse import parse_qs
 HOST = "127.0.0.1"
 PORT = 17891
 HELPER = "/usr/sbin/create-local-account.sh"
+GAIA_HELPER = "/usr/sbin/disable-gaia-after-local-account"
 INSTALLER = "/usr/sbin/install-to-disk.sh"
 MARKER = "/var/lib/nvidia-generic-auth/local-account-setup.done"
 LIMITS_PATHS = (
@@ -325,8 +326,24 @@ def create_account(password: str) -> str:
     os.makedirs(os.path.dirname(MARKER), exist_ok=True)
     with open(MARKER, "w", encoding="utf-8") as fh:
         fh.write(FIXED_USER + "\n")
+    gaia_note = ""
+    gaia = GAIA_HELPER
+    if not os.path.isfile(gaia):
+        gaia = "/usr/sbin/scripts/disable-gaia-after-local-account.sh"
+    if os.path.isfile(gaia):
+        gproc = subprocess.run(
+            [gaia, FIXED_USER],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+        if gproc.returncode != 0:
+            gaia_note = " (WARN: disable-gaia helper failed — run disable-gaia-after-local-account)"
+        else:
+            gaia_note = " Gaia disabled; login UI restarted."
     return (
-        f"Created {FIXED_USER} (label {KEY_LABEL}). "
+        f"Created {FIXED_USER} (label {KEY_LABEL}).{gaia_note} "
         "Sign in on that pod. Do not click Create local account → Next."
     )
 
